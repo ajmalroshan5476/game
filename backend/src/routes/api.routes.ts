@@ -6,6 +6,7 @@ import { ResultService } from '../services/result.service.js';
 import { FinanceService } from '../services/finance.service.js';
 import { ReportService } from '../services/report.service.js';
 import { query } from '../db/pool.js';
+import { getISTDateString } from '../utils/time.js';
 import bcrypt from 'bcryptjs';
 
 interface AuthUser {
@@ -162,7 +163,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   fastify.get('/api/games', { preHandler: authenticate }, async (req) => {
     const orgId = req.user!.orgId;
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getISTDateString();
 
     // Ensure today's draws exist for all active games
     const activeGames = await query(`SELECT id, code, name FROM games WHERE org_id = $1 AND is_active = TRUE`, [orgId]);
@@ -228,12 +229,12 @@ export async function apiRoutes(fastify: FastifyInstance) {
                   'isCutoffPassed', (NOW() >= d.cutoff_time)
                 ) ORDER BY d.draw_date DESC, d.draw_time ASC)
                 FROM draws d
-                WHERE d.game_id = g.id AND d.draw_date >= CURRENT_DATE
+                WHERE d.game_id = g.id AND d.draw_date >= $2::date
               ) AS draws
        FROM games g
        WHERE g.org_id = $1 AND g.is_active = TRUE
        ORDER BY g.name ASC`,
-      [orgId]
+      [orgId, todayStr]
     );
 
     return {
@@ -248,7 +249,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/draws', { preHandler: authenticate }, async (req) => {
     const orgId = req.user!.orgId;
     const { date } = req.query as any;
-    const drawDate = date || new Date().toISOString().split('T')[0];
+    const drawDate = date || getISTDateString();
 
     const res = await query(
       `SELECT d.id, d.game_id, d.draw_date, d.draw_time, d.cutoff_time, d.edit_cutoff_time, d.status,

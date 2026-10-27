@@ -1,4 +1,5 @@
 import { pool } from './pool.js';
+import { getISTDateString } from '../utils/time.js';
 import bcrypt from 'bcryptjs';
 
 export async function runSeed() {
@@ -103,7 +104,7 @@ export async function runSeed() {
     }
 
     // 5. Draws for today
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getISTDateString();
     const draws = [
       {
         gameCode: 'DEAR_1PM',

@@ -93,17 +93,46 @@ export class ReportService {
 
     const res = await query(sql, params);
 
-    // Filter-aware summary
-    const summarySql = `
-      SELECT COUNT(DISTINCT t.id) AS total_bills,
-             COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
-             COALESCE(SUM(t.total_amount), 0) AS total_sales
-      FROM tickets t
-      JOIN draws d ON d.id = t.draw_id
-      JOIN games g ON g.id = d.game_id
-      JOIN users u ON u.id = t.user_id
-      ${whereClause}
-    `;
+    // Filter-aware summary: if filtered by mode or group, aggregate from matching entries
+    const hasEntryFilter = Boolean(filters?.mode && filters.mode !== 'ALL' && filters.mode !== 'undefined') ||
+      Boolean(filters?.group && ['1', '2', '3'].includes(filters.group));
+
+    let summarySql: string;
+    if (hasEntryFilter) {
+      let entryConditions = '';
+      if (filters?.mode && filters.mode !== 'ALL' && filters.mode !== 'undefined') {
+        params.push(filters.mode.trim());
+        entryConditions += ` AND te_sum.mode = $${params.length}`;
+      }
+      if (filters?.group && ['1', '2', '3'].includes(filters.group)) {
+        params.push(parseInt(filters.group, 10));
+        entryConditions += ` AND LENGTH(te_sum.number) = $${params.length}`;
+      }
+
+      summarySql = `
+        SELECT COUNT(DISTINCT t.id) AS total_bills,
+               COALESCE(SUM(te_sum.quantity), 0) AS total_quantity,
+               COALESCE(SUM(te_sum.total_price), 0) AS total_sales
+        FROM tickets t
+        JOIN draws d ON d.id = t.draw_id
+        JOIN games g ON g.id = d.game_id
+        JOIN users u ON u.id = t.user_id
+        JOIN ticket_entries te_sum ON te_sum.ticket_id = t.id
+        ${whereClause}
+        ${entryConditions}
+      `;
+    } else {
+      summarySql = `
+        SELECT COUNT(DISTINCT t.id) AS total_bills,
+               COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
+               COALESCE(SUM(t.total_amount), 0) AS total_sales
+        FROM tickets t
+        JOIN draws d ON d.id = t.draw_id
+        JOIN games g ON g.id = d.game_id
+        JOIN users u ON u.id = t.user_id
+        ${whereClause}
+      `;
+    }
     const summaryRes = await query(summarySql, params);
 
     return {

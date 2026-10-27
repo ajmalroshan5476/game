@@ -65,7 +65,18 @@ export class ResultService {
         return rulesMap.get(`${mode}_${pos}`) || { prizeAmount: fallbackPrize, superCommission: fallbackSuper };
       };
 
-      // 3. Insert official result
+      // 3. Clean up any previous results, winning records, and resulting ledger entries for this draw to avoid duplicates
+      await client.query(
+        `DELETE FROM financial_ledger WHERE draw_id = $1 AND entry_type IN ('PRIZE_PAYABLE', 'COMMISSION_PAYABLE')`,
+        [payload.drawId]
+      );
+      await client.query(
+        `DELETE FROM winning_records WHERE result_id IN (SELECT id FROM official_results WHERE draw_id = $1)`,
+        [payload.drawId]
+      );
+      await client.query(`DELETE FROM official_results WHERE draw_id = $1`, [payload.drawId]);
+
+      // Insert fresh official result
       const clean1st = payload.firstPrize.trim();
       const clean2nd = payload.secondPrize?.trim() || null;
       const clean3rd = payload.thirdPrize?.trim() || null;
@@ -130,7 +141,34 @@ export class ResultService {
 
         // 1. Evaluate 3-digit matches
         if (entry.number.length === 3) {
-          if (entry.mode === 'SUPER' || !entry.is_box) {
+          if (entry.mode === 'BOX' || entry.is_box) {
+            // BOX Mode Evaluation
+            if (entry.number === clean1st) {
+              // Exact 1st Prize match: Position 1 (₹3,000, Super: ₹300)
+              winningPos = 'BOX_FIRST';
+              rule = getRule('BOX', 'FIRST', 3000.0, 300.0);
+            } else if (isBoxMatch(entry.number, clean1st)) {
+              // Permutation of 1st Prize: Positions 2..6 (₹800, Super: ₹30)
+              winningPos = 'BOX_OTHER';
+              rule = getRule('BOX', 'SECOND', 800.0, 30.0);
+            } else if (clean2nd && isBoxMatch(entry.number, clean2nd)) {
+              winningPos = 'BOX_SECOND';
+              rule = getRule('BOX', 'SECOND', 800.0, 30.0);
+            } else if (clean3rd && isBoxMatch(entry.number, clean3rd)) {
+              winningPos = 'BOX_THIRD';
+              rule = getRule('BOX', 'THIRD', 800.0, 30.0);
+            } else if (clean4th && isBoxMatch(entry.number, clean4th)) {
+              winningPos = 'BOX_FOURTH';
+              rule = getRule('BOX', 'FOURTH', 800.0, 30.0);
+            } else if (clean5th && isBoxMatch(entry.number, clean5th)) {
+              winningPos = 'BOX_FIFTH';
+              rule = getRule('BOX', 'FIFTH', 800.0, 30.0);
+            } else if (clean6th.some((n) => isBoxMatch(entry.number, n))) {
+              winningPos = 'BOX_SIXTH';
+              rule = getRule('BOX', 'SIXTH', 800.0, 30.0);
+            }
+          } else {
+            // SUPER Mode Evaluation
             if (entry.number === clean1st) {
               winningPos = 'FIRST';
               rule = getRule('SUPER', 'FIRST', 5000.0, 400.0);
@@ -149,26 +187,6 @@ export class ResultService {
             } else if (clean6th.includes(entry.number)) {
               winningPos = 'SIXTH';
               rule = getRule('SUPER', 'SIXTH', 20.0, 10.0);
-            }
-          } else if (entry.mode === 'BOX' || entry.is_box) {
-            if (isBoxMatch(entry.number, clean1st)) {
-              winningPos = 'BOX_FIRST';
-              rule = getRule('BOX', 'FIRST', 3000.0, 300.0);
-            } else if (clean2nd && isBoxMatch(entry.number, clean2nd)) {
-              winningPos = 'BOX_SECOND';
-              rule = getRule('BOX', 'SECOND', 800.0, 30.0);
-            } else if (clean3rd && isBoxMatch(entry.number, clean3rd)) {
-              winningPos = 'BOX_THIRD';
-              rule = getRule('BOX', 'THIRD', 800.0, 30.0);
-            } else if (clean4th && isBoxMatch(entry.number, clean4th)) {
-              winningPos = 'BOX_FOURTH';
-              rule = getRule('BOX', 'FOURTH', 800.0, 30.0);
-            } else if (clean5th && isBoxMatch(entry.number, clean5th)) {
-              winningPos = 'BOX_FIFTH';
-              rule = getRule('BOX', 'FIFTH', 800.0, 30.0);
-            } else if (clean6th.some((n) => isBoxMatch(entry.number, n))) {
-              winningPos = 'BOX_SIXTH';
-              rule = getRule('BOX', 'SIXTH', 800.0, 30.0);
             }
           }
         }
@@ -294,7 +312,9 @@ export class ResultService {
               r.id AS result_id, r.first_prize, r.second_prize, r.third_prize, r.fourth_prize, r.fifth_prize, r.sixth_prizes
        FROM draws d
        JOIN games g ON g.id = d.game_id
-       LEFT JOIN official_results r ON r.draw_id = d.id
+       LEFT JOIN LATERAL (
+         SELECT * FROM official_results WHERE draw_id = d.id ORDER BY created_at DESC LIMIT 1
+       ) r ON true
        WHERE d.id = $1 AND g.org_id = $2`,
       [drawId, orgId]
     );
@@ -305,20 +325,22 @@ export class ResultService {
 
     const draw = drawRes.rows[0];
 
-    // Find all winning records for this draw under this org
-    const winnersRes = await query(
-      `SELECT wr.id, wr.prize_position, wr.prize_amount, wr.commission_amount, wr.created_at,
-              t.ticket_number, t.customer_name,
-              te.number AS winning_number, te.quantity, te.mode,
-              u.username, u.id AS user_id
-       FROM winning_records wr
-       JOIN tickets t ON t.id = wr.ticket_id
-       JOIN ticket_entries te ON te.id = wr.entry_id
-       JOIN users u ON u.id = wr.user_id
-       WHERE t.draw_id = $1 AND wr.org_id = $2
-       ORDER BY wr.prize_amount DESC, wr.created_at ASC`,
-      [drawId, orgId]
-    );
+    // Find winning records for the active result of this draw under this org
+    const winnersRes = draw.result_id
+      ? await query(
+          `SELECT DISTINCT ON (wr.id) wr.id, wr.prize_position, wr.prize_amount, wr.commission_amount, wr.created_at,
+                  t.ticket_number, t.customer_name,
+                  te.number AS winning_number, te.quantity, te.mode,
+                  u.username, u.id AS user_id
+           FROM winning_records wr
+           JOIN tickets t ON t.id = wr.ticket_id
+           JOIN ticket_entries te ON te.id = wr.entry_id
+           JOIN users u ON u.id = wr.user_id
+           WHERE wr.result_id = $1 AND wr.org_id = $2
+           ORDER BY wr.id, wr.prize_amount DESC, wr.created_at ASC`,
+          [draw.result_id, orgId]
+        )
+      : { rows: [] };
 
     let totalPrize = 0;
     let totalCommission = 0;
