@@ -11,7 +11,7 @@ const getBaseUrl = () => {
       return origin;
     }
   }
-  return 'http://localhost:4001';
+  return 'https://game-guqn.onrender.com';
 };
 
 export const API_BASE = getBaseUrl();
