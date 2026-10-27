@@ -16,17 +16,17 @@
     "@fastify/cors": "^10.0.2",
     "@fastify/jwt": "^9.0.4",
     "@fastify/sensible": "^6.0.3",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.13.10",
+    "@types/pg": "^8.11.11",
     "bcryptjs": "^3.0.2",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "pg": "^8.13.3",
+    "typescript": "^5.8.2",
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/node": "^22.13.10",
-    "@types/pg": "^8.11.11",
-    "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "tsx": "^4.19.3"
   }
 }
