@@ -26,6 +26,7 @@ import {
   Receipt,
   CheckSquare,
   Square,
+  Filter,
 } from 'lucide-react-native';
 
 interface ReportsScreenProps {
@@ -51,6 +52,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
 
   // Dropdown Modals
   const [pickerType, setPickerType] = useState<'ticket' | 'group' | 'mode' | null>(null);
+
+  // Toggle filters visibility (collapsed by default to show tickets cleanly like screenshot)
+  const [showFilters, setShowFilters] = useState(false);
 
   // Report Data
   const [loading, setLoading] = useState(false);
@@ -139,6 +143,53 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
     }
   };
 
+  // Helper to format date cleanly: YYYY-MM-DD
+  const formatBillDate = (drawDate?: any, createdAt?: any) => {
+    if (drawDate) {
+      if (typeof drawDate === 'string') {
+        return drawDate.split('T')[0];
+      }
+      try {
+        return new Date(drawDate).toISOString().split('T')[0];
+      } catch {
+        return String(drawDate);
+      }
+    }
+    if (createdAt) {
+      if (typeof createdAt === 'string') {
+        return createdAt.split('T')[0];
+      }
+      try {
+        return new Date(createdAt).toISOString().split('T')[0];
+      } catch {
+        return String(createdAt);
+      }
+    }
+    return '';
+  };
+
+  // Helper to sort entries identically to screenshot: numbers descending, BOX before SUPER
+  const getSortedEntries = (entries: any[]) => {
+    if (!entries || !Array.isArray(entries)) return [];
+    return [...entries].sort((a, b) => {
+      // 1. Numerically descending for number (e.g. 848, 847, 846, 845 in reference)
+      const numA = parseInt(a.number, 10);
+      const numB = parseInt(b.number, 10);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+        return numB - numA;
+      }
+      if (a.number !== b.number) {
+        return String(b.number).localeCompare(String(a.number));
+      }
+      // 2. Same number: BOX before non-BOX/SUPER (e.g. D-BOX-1 then DEAR-1)
+      const isBoxA = a.is_box || (a.mode || '').toUpperCase() === 'BOX';
+      const isBoxB = b.is_box || (b.mode || '').toUpperCase() === 'BOX';
+      if (isBoxA && !isBoxB) return -1;
+      if (!isBoxA && isBoxB) return 1;
+      return 0;
+    });
+  };
+
   // Helper to format date/time like screenshot: 'Oct 30, 9:02 AM'
   const formatBillTime = (dateString: string) => {
     try {
@@ -213,41 +264,53 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
           <ArrowLeft size={22} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{getHeaderTitle()}</Text>
-        <TouchableOpacity style={styles.headerBtn} onPress={onBack}>
-          <Home size={22} color="#E53935" fill="#E53935" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => setShowFilters(!showFilters)}
+            accessibilityLabel="Filter Options"
+          >
+            <Filter size={20} color={showFilters ? '#0080FF' : '#475569'} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerBtn} onPress={onBack}>
+            <Home size={22} color="#E53935" fill="#E53935" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Sub-tab switcher to switch between the 5 report screens */}
-      <View style={styles.tabBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-          {[
-            { id: 'sales', label: 'Sales' },
-            { id: 'winnings', label: 'Winning' },
-            { id: 'bill-wise', label: 'Bill Wise' },
-            { id: 'number-wise', label: 'Number Wise' },
-            { id: 'net-pay', label: 'Net Pay' },
-          ].map((t) => {
-            const active = reportType === t.id;
-            return (
-              <TouchableOpacity
-                key={t.id}
-                style={[styles.tabItem, active && styles.tabItemActive]}
-                onPress={() => setReportType(t.id as ReportType)}
-              >
-                <Text style={[styles.tabItemText, active && styles.tabItemTextActive]}>
-                  {t.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
+      {/* Sub-tab switcher to switch between the 5 report screens (Visible when filters expanded) */}
+      {showFilters && (
+        <View style={styles.tabBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
+            {[
+              { id: 'sales', label: 'Sales' },
+              { id: 'winnings', label: 'Winning' },
+              { id: 'bill-wise', label: 'Bill Wise' },
+              { id: 'number-wise', label: 'Number Wise' },
+              { id: 'net-pay', label: 'Net Pay' },
+            ].map((t) => {
+              const active = reportType === t.id;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[styles.tabItem, active && styles.tabItemActive]}
+                  onPress={() => setReportType(t.id as ReportType)}
+                >
+                  <Text style={[styles.tabItemText, active && styles.tabItemTextActive]}>
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* REPLICATED FILTER CARD (Exact layout from screenshots) */}
-        <View style={styles.filterCard}>
-          {/* Row 1: Ticket / Game Dropdown */}
+        {/* REPLICATED FILTER CARD (Exact layout from screenshots - toggleable) */}
+        {showFilters && (
+          <View style={styles.filterCard}>
+            {/* Row 1: Ticket / Game Dropdown */}
           <Text style={styles.fieldLabel}>
             {reportType === 'bill-wise' ? 'Draw Time' : 'Ticket'}
           </Text>
@@ -371,7 +434,10 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
           <TouchableOpacity
             style={[styles.submitButton, { backgroundColor: buttonColor }]}
             activeOpacity={0.85}
-            onPress={fetchReport}
+            onPress={() => {
+              setShowFilters(false);
+              fetchReport();
+            }}
             disabled={loading}
           >
             {loading ? (
@@ -381,6 +447,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
             )}
           </TouchableOpacity>
         </View>
+        )}
 
         {/* REAL-TIME DATA DISPLAY AREA */}
         <View style={styles.resultsArea}>
@@ -388,91 +455,92 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
             <ActivityIndicator size="large" color={colors.emerald} style={{ marginTop: 24 }} />
           ) : (
             <>
-              {/* 1. SALES REPORT REAL-TIME DATA */}
+              {/* 1. SALES REPORT REAL-TIME DATA (Pixel-perfect replication of reference screenshot) */}
               {reportType === 'sales' && data && (
-                <View>
-                  {/* Real-time Summary Banner */}
-                  <View style={styles.summaryBanner}>
-                    <View style={styles.summaryStat}>
-                      <Text style={styles.summaryStatLabel}>Total Bills</Text>
-                      <Text style={styles.summaryStatVal}>{data.summary?.total_bills || 0}</Text>
+                <View style={{ width: '100%' }}>
+                  {showFilters && (
+                    <View style={styles.summaryBanner}>
+                      <View style={styles.summaryStat}>
+                        <Text style={styles.summaryStatLabel}>Total Bills</Text>
+                        <Text style={styles.summaryStatVal}>{data.summary?.total_bills || 0}</Text>
+                      </View>
+                      <View style={styles.summaryStat}>
+                        <Text style={styles.summaryStatLabel}>Total Quantity</Text>
+                        <Text style={styles.summaryStatVal}>{data.summary?.total_quantity || 0}</Text>
+                      </View>
+                      <View style={styles.summaryStat}>
+                        <Text style={styles.summaryStatLabel}>Total Sales</Text>
+                        <Text style={[styles.summaryStatVal, { color: colors.emeraldDark }]}>
+                          ₹{data.summary?.total_sales || 0}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={styles.summaryStat}>
-                      <Text style={styles.summaryStatLabel}>Total Quantity</Text>
-                      <Text style={styles.summaryStatVal}>{data.summary?.total_quantity || 0}</Text>
-                    </View>
-                    <View style={styles.summaryStat}>
-                      <Text style={styles.summaryStatLabel}>Total Sales</Text>
-                      <Text style={[styles.summaryStatVal, { color: colors.emeraldDark }]}>
-                        ₹{data.summary?.total_sales || 0}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.resultsHeading}>
-                    SALES BILLS DETAILED ({data.items?.length || 0})
-                  </Text>
+                  )}
 
                   {(!data.items || data.items.length === 0) ? (
                     <Text style={styles.noData}>No sales tickets found for the selected filters.</Text>
                   ) : (
-                    data.items.map((item: any) => {
+                    data.items.map((item: any, idx: number) => {
                       const billGame = formatBillGame(item);
                       const billTime = formatBillTime(item.created_at);
-                      const billDate = item.draw_date || (item.created_at ? item.created_at.split('T')[0] : '');
-                      const totalPriceStr = parseFloat(item.total_amount).toFixed(2);
+                      const billDate = formatBillDate(item.draw_date, item.created_at);
+                      const totalPriceStr = parseFloat(item.total_amount || 0).toFixed(2);
+                      const sortedEntries = getSortedEntries(item.entries);
 
                       return (
-                        <View key={item.id} style={styles.billDetailedContainer}>
-                          {/* Screenshot Blue Header Bar */}
-                          <View style={styles.billBlueHeader}>
-                            {/* Left Column */}
-                            <View style={{ flex: 1.2 }}>
-                              <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
-                              <Text style={styles.billHeaderTime}>{billTime}</Text>
-                            </View>
-
-                            {/* Center Column */}
-                            <View style={{ flex: 1, alignItems: 'center' }}>
-                              <Text style={styles.billHeaderGame}>{billGame}</Text>
-                              <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
-                            </View>
-
-                            {/* Right Column */}
-                            <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
-                              <Text style={styles.billHeaderDate}>{billDate}</Text>
-                              <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
-                              <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
-                            </View>
-                          </View>
-
-                          {/* Screenshot Table Rows */}
-                          <View style={styles.billTable}>
-                            {(!item.entries || item.entries.length === 0) ? (
-                              <View style={styles.billTableRow}>
-                                <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
-                                  No entries recorded for this bill
-                                </Text>
+                        <View key={item.id || idx}>
+                          {idx > 0 && <View style={styles.billDivider} />}
+                          <View style={styles.billDetailedContainer}>
+                            {/* Screenshot Blue Header Bar */}
+                            <View style={styles.billBlueHeader}>
+                              {/* Left Column */}
+                              <View style={{ flex: 1.2 }}>
+                                <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
+                                <Text style={styles.billHeaderTime}>{billTime}</Text>
                               </View>
-                            ) : (
-                              item.entries.map((entry: any, eIdx: number) => {
-                                const catLabel = formatEntryCategory(entry, item);
-                                const entryPrice = entry.total_price
-                                  ? parseFloat(entry.total_price).toFixed(2)
-                                  : entry.unit_price
-                                  ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
-                                  : (entry.quantity * 10).toFixed(2);
 
-                                return (
-                                  <View key={eIdx} style={styles.billTableRow}>
-                                    <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
-                                    <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
-                                    <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
-                                    <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
-                                  </View>
-                                );
-                              })
-                            )}
+                              {/* Center Column */}
+                              <View style={{ flex: 1, alignItems: 'center' }}>
+                                <Text style={styles.billHeaderGame}>{billGame}</Text>
+                                <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
+                              </View>
+
+                              {/* Right Column */}
+                              <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+                                <Text style={styles.billHeaderDate}>{billDate}</Text>
+                                <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
+                                <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
+                              </View>
+                            </View>
+
+                            {/* Screenshot Table Rows */}
+                            <View style={styles.billTable}>
+                              {sortedEntries.length === 0 ? (
+                                <View style={styles.billTableRow}>
+                                  <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
+                                    No entries recorded for this bill
+                                  </Text>
+                                </View>
+                              ) : (
+                                sortedEntries.map((entry: any, eIdx: number) => {
+                                  const catLabel = formatEntryCategory(entry, item);
+                                  const entryPrice = entry.total_price
+                                    ? parseFloat(entry.total_price).toFixed(2)
+                                    : entry.unit_price
+                                    ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
+                                    : (entry.quantity * 10).toFixed(2);
+
+                                  return (
+                                    <View key={eIdx} style={styles.billTableRow}>
+                                      <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
+                                      <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
+                                      <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
+                                      <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
+                                    </View>
+                                  );
+                                })
+                              )}
+                            </View>
                           </View>
                         </View>
                       );
@@ -774,8 +842,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   scrollContent: {
-    padding: 16,
-    maxWidth: 500,
+    paddingBottom: 40,
     width: '100%',
     alignSelf: 'center',
   },
@@ -784,6 +851,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 6,
     padding: 18,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E5E7EB',
     shadowColor: '#000',
@@ -791,7 +861,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 3,
     elevation: 2,
-    marginBottom: 20,
   },
   fieldLabel: {
     fontSize: 13,
@@ -875,6 +944,7 @@ const styles = StyleSheet.create({
   // REAL-TIME RESULTS STYLES
   resultsArea: {
     marginBottom: 30,
+    width: '100%',
   },
   resultsHeading: {
     fontSize: 12,
@@ -882,6 +952,7 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 10,
     letterSpacing: 0.5,
+    marginHorizontal: 16,
   },
   summaryBanner: {
     flexDirection: 'row',
@@ -891,6 +962,7 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: '#E5E7EB',
+    marginHorizontal: 16,
     marginBottom: 14,
   },
   summaryStat: {
@@ -914,92 +986,106 @@ const styles = StyleSheet.create({
   },
   billDetailedContainer: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    marginBottom: 16,
-    overflow: 'hidden',
+    width: '100%',
+  },
+  billDivider: {
+    height: 12,
+    backgroundColor: '#EAEEF5',
+    width: '100%',
   },
   billBlueHeader: {
-    backgroundColor: '#0084FF',
+    backgroundColor: '#0080FF',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   billHeaderNumber: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
   },
   billHeaderTime: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 13.5,
+    fontWeight: '500',
     marginTop: 4,
   },
   billHeaderGame: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
+    textAlign: 'center',
   },
   billHeaderCount: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: '500',
     marginTop: 4,
+    textAlign: 'center',
   },
   billHeaderDate: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
+    textAlign: 'right',
   },
   billHeaderPrice: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: '600',
     marginTop: 4,
+    textAlign: 'right',
   },
   billHeaderComm: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 13.5,
     fontWeight: '500',
-    marginTop: 2,
+    marginTop: 3,
+    textAlign: 'right',
   },
   billTable: {
     backgroundColor: '#FFFFFF',
+    width: '100%',
   },
   billTableRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
+    minHeight: 44,
   },
   billTableCell: {
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    borderRightWidth: 1,
-    borderRightColor: '#E2E8F0',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     color: '#1E293B',
-    fontSize: 13,
+    fontSize: 14,
+    textAlign: 'center',
   },
   billColCat: {
-    flex: 1.2,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  billColNum: {
-    flex: 1,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  billColCount: {
-    flex: 0.8,
+    flex: 1.3,
     textAlign: 'center',
     fontWeight: '500',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+  },
+  billColNum: {
+    flex: 0.9,
+    textAlign: 'center',
+    fontWeight: '500',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+  },
+  billColCount: {
+    flex: 0.9,
+    textAlign: 'center',
+    fontWeight: '500',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
   },
   billColPrice: {
-    flex: 1.1,
+    flex: 1.0,
     textAlign: 'center',
     fontWeight: '500',
     borderRightWidth: 0,
@@ -1008,6 +1094,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#CBD5E1',
+    marginHorizontal: 16,
     marginBottom: 16,
     overflow: 'hidden',
   },

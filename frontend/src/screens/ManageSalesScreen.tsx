@@ -127,6 +127,49 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
     }
   };
 
+  const formatBillDate = (drawDate?: any, createdAt?: any) => {
+    if (drawDate) {
+      if (typeof drawDate === 'string') {
+        return drawDate.split('T')[0];
+      }
+      try {
+        return new Date(drawDate).toISOString().split('T')[0];
+      } catch {
+        return String(drawDate);
+      }
+    }
+    if (createdAt) {
+      if (typeof createdAt === 'string') {
+        return createdAt.split('T')[0];
+      }
+      try {
+        return new Date(createdAt).toISOString().split('T')[0];
+      } catch {
+        return String(createdAt);
+      }
+    }
+    return '';
+  };
+
+  const getSortedEntries = (entries: any[]) => {
+    if (!entries || !Array.isArray(entries)) return [];
+    return [...entries].sort((a, b) => {
+      const numA = parseInt(a.number, 10);
+      const numB = parseInt(b.number, 10);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+        return numB - numA;
+      }
+      if (a.number !== b.number) {
+        return String(b.number).localeCompare(String(a.number));
+      }
+      const isBoxA = a.is_box || (a.mode || '').toUpperCase() === 'BOX';
+      const isBoxB = b.is_box || (b.mode || '').toUpperCase() === 'BOX';
+      if (isBoxA && !isBoxB) return -1;
+      if (!isBoxA && isBoxB) return 1;
+      return 0;
+    });
+  };
+
   const formatBillGame = (item: any) => {
     if (item.game_code && item.game_code !== 'ALL') return item.game_code;
     const name = item.game_name || '';
@@ -312,63 +355,67 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
             <Text style={styles.noData}>No sales tickets found for the selected filters.</Text>
           </View>
         ) : (
-          salesData.items.map((item: any) => {
+          salesData.items.map((item: any, idx: number) => {
             const billGame = formatBillGame(item);
             const billTime = formatBillTime(item.created_at);
-            const billDate = item.draw_date || (item.created_at ? item.created_at.split('T')[0] : '');
-            const totalPriceStr = parseFloat(item.total_amount).toFixed(2);
+            const billDate = formatBillDate(item.draw_date, item.created_at);
+            const totalPriceStr = parseFloat(item.total_amount || 0).toFixed(2);
+            const sortedEntries = getSortedEntries(item.entries);
 
             return (
-              <View key={item.id} style={styles.billDetailedContainer}>
-                {/* Screenshot Blue Header Bar */}
-                <View style={styles.billBlueHeader}>
-                  {/* Left Column */}
-                  <View style={{ flex: 1.2 }}>
-                    <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
-                    <Text style={styles.billHeaderTime}>{billTime}</Text>
-                  </View>
-
-                  {/* Center Column */}
-                  <View style={{ flex: 1, alignItems: 'center' }}>
-                    <Text style={styles.billHeaderGame}>{billGame}</Text>
-                    <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
-                  </View>
-
-                  {/* Right Column */}
-                  <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
-                    <Text style={styles.billHeaderDate}>{billDate}</Text>
-                    <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
-                    <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
-                  </View>
-                </View>
-
-                {/* Screenshot Table Rows */}
-                <View style={styles.billTable}>
-                  {(!item.entries || item.entries.length === 0) ? (
-                    <View style={styles.billTableRow}>
-                      <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
-                        No entries recorded for this bill
-                      </Text>
+              <View key={item.id || idx}>
+                {idx > 0 && <View style={styles.billDivider} />}
+                <View style={styles.billDetailedContainer}>
+                  {/* Screenshot Blue Header Bar */}
+                  <View style={styles.billBlueHeader}>
+                    {/* Left Column */}
+                    <View style={{ flex: 1.2 }}>
+                      <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
+                      <Text style={styles.billHeaderTime}>{billTime}</Text>
                     </View>
-                  ) : (
-                    item.entries.map((entry: any, eIdx: number) => {
-                      const catLabel = formatEntryCategory(entry, item);
-                      const entryPrice = entry.total_price
-                        ? parseFloat(entry.total_price).toFixed(2)
-                        : entry.unit_price
-                        ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
-                        : (entry.quantity * 10).toFixed(2);
 
-                      return (
-                        <View key={eIdx} style={styles.billTableRow}>
-                          <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
-                          <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
-                          <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
-                          <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
-                        </View>
-                      );
-                    })
-                  )}
+                    {/* Center Column */}
+                    <View style={{ flex: 1, alignItems: 'center' }}>
+                      <Text style={styles.billHeaderGame}>{billGame}</Text>
+                      <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
+                    </View>
+
+                    {/* Right Column */}
+                    <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+                      <Text style={styles.billHeaderDate}>{billDate}</Text>
+                      <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
+                      <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
+                    </View>
+                  </View>
+
+                  {/* Screenshot Table Rows */}
+                  <View style={styles.billTable}>
+                    {sortedEntries.length === 0 ? (
+                      <View style={styles.billTableRow}>
+                        <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
+                          No entries recorded for this bill
+                        </Text>
+                      </View>
+                    ) : (
+                      sortedEntries.map((entry: any, eIdx: number) => {
+                        const catLabel = formatEntryCategory(entry, item);
+                        const entryPrice = entry.total_price
+                          ? parseFloat(entry.total_price).toFixed(2)
+                          : entry.unit_price
+                          ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
+                          : (entry.quantity * 10).toFixed(2);
+
+                        return (
+                          <View key={eIdx} style={styles.billTableRow}>
+                            <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
+                            <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
+                            <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
+                            <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
+                          </View>
+                        );
+                      })
+                    )}
+                  </View>
                 </View>
               </View>
             );
@@ -681,92 +728,106 @@ const styles = StyleSheet.create({
   },
   billDetailedContainer: {
     backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-    marginBottom: 16,
-    overflow: 'hidden',
+    width: '100%',
+  },
+  billDivider: {
+    height: 12,
+    backgroundColor: '#EAEEF5',
+    width: '100%',
   },
   billBlueHeader: {
-    backgroundColor: '#0084FF',
+    backgroundColor: '#0080FF',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   billHeaderNumber: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
   },
   billHeaderTime: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 13.5,
+    fontWeight: '500',
     marginTop: 4,
   },
   billHeaderGame: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
+    textAlign: 'center',
   },
   billHeaderCount: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: '500',
     marginTop: 4,
+    textAlign: 'center',
   },
   billHeaderDate: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
+    textAlign: 'right',
   },
   billHeaderPrice: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13.5,
     fontWeight: '600',
     marginTop: 4,
+    textAlign: 'right',
   },
   billHeaderComm: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: 13.5,
     fontWeight: '500',
-    marginTop: 2,
+    marginTop: 3,
+    textAlign: 'right',
   },
   billTable: {
     backgroundColor: '#FFFFFF',
+    width: '100%',
   },
   billTableRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
+    minHeight: 44,
   },
   billTableCell: {
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    borderRightWidth: 1,
-    borderRightColor: '#E2E8F0',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     color: '#1E293B',
-    fontSize: 13,
+    fontSize: 14,
+    textAlign: 'center',
   },
   billColCat: {
-    flex: 1.2,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  billColNum: {
-    flex: 1,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
-  billColCount: {
-    flex: 0.8,
+    flex: 1.3,
     textAlign: 'center',
     fontWeight: '500',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+  },
+  billColNum: {
+    flex: 0.9,
+    textAlign: 'center',
+    fontWeight: '500',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+  },
+  billColCount: {
+    flex: 0.9,
+    textAlign: 'center',
+    fontWeight: '500',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
   },
   billColPrice: {
-    flex: 1.1,
+    flex: 1.0,
     textAlign: 'center',
     fontWeight: '500',
     borderRightWidth: 0,
