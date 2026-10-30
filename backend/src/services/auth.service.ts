@@ -89,7 +89,16 @@ export class AuthService {
     const res = await query(
       `SELECT u.id, u.username, u.role, u.status, u.created_at,
               COALESCE(SUM(t.total_amount), 0) AS total_sales,
-              COUNT(t.id) AS ticket_count
+              COUNT(t.id) AS ticket_count,
+              (
+                SELECT json_agg(json_build_object(
+                  'mode', utp.mode,
+                  'price', utp.price,
+                  'game_id', utp.game_id
+                ))
+                FROM user_ticket_prices utp
+                WHERE utp.user_id = u.id AND utp.org_id = $1
+              ) AS ticket_prices
        FROM users u
        LEFT JOIN tickets t ON t.user_id = u.id AND t.status = 'ACTIVE'
        WHERE u.org_id = $1 AND u.role = 'USER'

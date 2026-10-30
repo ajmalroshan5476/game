@@ -27,6 +27,7 @@ import {
   ChevronUp,
   Settings2,
   Save,
+  ChevronRight,
 } from 'lucide-react-native';
 
 interface ManageUsersScreenProps {
@@ -339,6 +340,65 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
                   </TouchableOpacity>
                 </View>
 
+                {/* Ticket Pricing Card for this Agent */}
+                {(() => {
+                  const defaultRates: Record<string, string> = {
+                    SUPER: '10',
+                    BOX: '10',
+                    AB: '10',
+                    BC: '10',
+                    AC: '10',
+                    A: '12',
+                    B: '12',
+                    C: '12',
+                  };
+                  const userRates = { ...defaultRates };
+                  if (Array.isArray(u.ticket_prices)) {
+                    for (const tp of u.ticket_prices) {
+                      if (!tp.game_id || tp.game_id === 'ALL') {
+                        userRates[tp.mode] = parseFloat(tp.price).toFixed(0);
+                      }
+                    }
+                  }
+
+                  return (
+                    <View style={styles.userPricingCard}>
+                      <View style={styles.userPricingHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Coins size={14} color="#059669" />
+                          <Text style={styles.userPricingTitle}>Ticket Pricing Card</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.editPricePillBtn}
+                          onPress={() => openPriceEditModal(u)}
+                        >
+                          <Text style={styles.editPricePillText}>Edit Rates</Text>
+                          <ChevronRight size={13} color="#059669" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.userPricingGrid}>
+                        <View style={styles.userPriceTag}>
+                          <Text style={styles.userPriceTagLabel}>SUPER</Text>
+                          <Text style={styles.userPriceTagVal}>₹{userRates.SUPER}</Text>
+                        </View>
+                        <View style={styles.userPriceTag}>
+                          <Text style={styles.userPriceTagLabel}>BOX</Text>
+                          <Text style={styles.userPriceTagVal}>₹{userRates.BOX}</Text>
+                        </View>
+                        <View style={styles.userPriceTag}>
+                          <Text style={styles.userPriceTagLabel}>AB/BC/AC</Text>
+                          <Text style={styles.userPriceTagVal}>₹{userRates.AB}</Text>
+                        </View>
+                        <View style={styles.userPriceTag}>
+                          <Text style={styles.userPriceTagLabel}>A / B / C</Text>
+                          <Text style={styles.userPriceTagVal}>₹{userRates.A}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })()}
+
                 {/* Sales stats and actions */}
                 <View style={styles.statsRow}>
                   <View style={styles.statBlock}>
@@ -357,7 +417,7 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
                       onPress={() => openPriceEditModal(u)}
                     >
                       <Coins size={14} color="#059669" />
-                      <Text style={styles.pricesBtnText}>Prices</Text>
+                      <Text style={styles.pricesBtnText}>Custom Pricing</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.resetPassBtn}
@@ -803,6 +863,65 @@ const styles = StyleSheet.create({
   statusPillText: {
     fontSize: 11,
     fontWeight: '700',
+  },
+  userPricingCard: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
+  userPricingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  userPricingTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#065F46',
+  },
+  editPricePillBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  editPricePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  userPricingGrid: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  userPriceTag: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D1FAE5',
+    borderRadius: 6,
+    paddingVertical: 4,
+    alignItems: 'center',
+  },
+  userPriceTagLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  userPriceTagVal: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#065F46',
+    marginTop: 1,
   },
   statsRow: {
     flexDirection: 'row',

@@ -140,6 +140,21 @@ export class LimitService {
     const cleanStart = String(start).padStart(digitType, '0');
     const cleanEnd = String(end).padStart(digitType, '0');
 
+    if (gameId === 'ALL') {
+      const gRes = await query(`SELECT id FROM games WHERE org_id = $1`, [orgId]);
+      let lastRow: any = null;
+      for (const g of gRes.rows) {
+        const res = await query(
+          `INSERT INTO game_range_limits (org_id, game_id, digit_type, start_range, end_range, max_cap, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           RETURNING id, game_id, digit_type, start_range, end_range, max_cap, created_at`,
+          [orgId, g.id, digitType, cleanStart, cleanEnd, maxCap]
+        );
+        lastRow = res.rows[0];
+      }
+      return lastRow || { success: true };
+    }
+
     const res = await query(
       `INSERT INTO game_range_limits (org_id, game_id, digit_type, start_range, end_range, max_cap, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())

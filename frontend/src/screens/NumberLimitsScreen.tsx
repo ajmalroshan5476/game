@@ -322,6 +322,135 @@ export const NumberLimitsScreen: React.FC<NumberLimitsScreenProps> = ({ onBack }
               </View>
             </View>
 
+            {/* Direct Inline Range Limit Setup Card */}
+            <View style={styles.inlineRangeCard}>
+              <View style={styles.inlineCardHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Layers size={16} color="#0284C7" />
+                  <Text style={styles.inlineCardTitle}>Set Universal Game Range Cap</Text>
+                </View>
+                <Text style={styles.inlineCardSub}>Block or Cap Number Range</Text>
+              </View>
+
+              {/* Target Game Selector */}
+              <Text style={styles.fieldLabel}>Select Game</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                <TouchableOpacity
+                  style={[styles.smallGamePill, rangeGameId === 'ALL' && styles.smallGamePillActive]}
+                  onPress={() => setRangeGameId('ALL')}
+                >
+                  <Text style={[styles.smallGamePillText, rangeGameId === 'ALL' && styles.smallGamePillTextActive]}>
+                    All Games
+                  </Text>
+                </TouchableOpacity>
+                {games.map((g) => (
+                  <TouchableOpacity
+                    key={g.id}
+                    style={[styles.smallGamePill, rangeGameId === g.id && styles.smallGamePillActive]}
+                    onPress={() => setRangeGameId(g.id)}
+                  >
+                    <Text style={[styles.smallGamePillText, rangeGameId === g.id && styles.smallGamePillTextActive]}>
+                      {g.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Digit Type Tabs */}
+              <Text style={styles.fieldLabel}>Digit Type</Text>
+              <View style={styles.digitSelectorRow}>
+                <TouchableOpacity
+                  style={[styles.digitTab, rangeDigitType === 1 && styles.digitTabActive]}
+                  onPress={() => handleDigitTypeChange(1)}
+                >
+                  <Text style={[styles.digitTabText, rangeDigitType === 1 && styles.digitTabTextActive]}>
+                    Single (0-9)
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.digitTab, rangeDigitType === 2 && styles.digitTabActive]}
+                  onPress={() => handleDigitTypeChange(2)}
+                >
+                  <Text style={[styles.digitTabText, rangeDigitType === 2 && styles.digitTabTextActive]}>
+                    Double (00-99)
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.digitTab, rangeDigitType === 3 && styles.digitTabActive]}
+                  onPress={() => handleDigitTypeChange(3)}
+                >
+                  <Text style={[styles.digitTabText, rangeDigitType === 3 && styles.digitTabTextActive]}>
+                    3-Digit (000-999)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Range Inputs */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Start Range</Text>
+                  <TextInput
+                    style={[styles.input, { textAlign: 'center', fontWeight: '800' }]}
+                    value={startRange}
+                    onChangeText={setStartRange}
+                    maxLength={rangeDigitType}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>End Range</Text>
+                  <TextInput
+                    style={[styles.input, { textAlign: 'center', fontWeight: '800' }]}
+                    value={endRange}
+                    onChangeText={setEndRange}
+                    maxLength={rangeDigitType}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={{ flex: 1.2 }}>
+                  <Text style={styles.fieldLabel}>Max Cap (0=Block)</Text>
+                  <TextInput
+                    style={[styles.input, { textAlign: 'center', fontWeight: '800' }]}
+                    value={rangeMaxCap}
+                    onChangeText={setRangeMaxCap}
+                    placeholder="100"
+                    placeholderTextColor="#94A3B8"
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              {/* Quick Presets & Submit */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    style={[styles.presetChip, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}
+                    onPress={() => setRangeMaxCap('0')}
+                  >
+                    <Text style={[styles.presetChipText, { color: '#DC2626' }]}>Block (0)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.presetChip, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}
+                    onPress={() => setRangeMaxCap('100')}
+                  >
+                    <Text style={[styles.presetChipText, { color: '#059669' }]}>Cap 100</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.saveRangeInlineBtn}
+                  onPress={handleSaveRangeLimit}
+                  disabled={savingRange}
+                >
+                  {savingRange ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.saveRangeInlineBtnText}>Save Range Cap</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+
             {/* Limits List */}
             <Text style={styles.sectionLabel}>
               ACTIVE UNIVERSAL GAME LIMITS ({gameLimits.length})
@@ -893,6 +1022,65 @@ const styles = StyleSheet.create({
     color: '#0C4A6E',
     marginTop: 2,
     lineHeight: 15,
+  },
+  inlineRangeCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    marginBottom: 16,
+  },
+  inlineCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F9FF',
+  },
+  inlineCardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0369A1',
+  },
+  inlineCardSub: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  smallGamePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  smallGamePillActive: {
+    backgroundColor: '#0284C7',
+    borderColor: '#0284C7',
+  },
+  smallGamePillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  smallGamePillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  saveRangeInlineBtn: {
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  saveRangeInlineBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   rangeLimitCard: {
     backgroundColor: '#FFFFFF',

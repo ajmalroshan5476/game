@@ -1044,31 +1044,49 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                 </View>
               ) : (
                 <View>
-                  {/* Step 2: All 6th Prizes Later */}
-                  <Text style={styles.inputLabel}>Add 6th Prize (3 Digits or space/comma separated)</Text>
-                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                  {/* Step 2: All 6th Prizes Later - Large & Scrollable */}
+                  <Text style={styles.inputLabel}>
+                    Add 6th Prize Numbers (Type or Paste in Bulk)
+                  </Text>
+                  <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 6 }}>
+                    Enter 3-digit numbers separated by spaces, commas, or new lines.
+                  </Text>
+                  
+                  <View style={{ marginBottom: 12 }}>
                     <TextInput
-                      style={[styles.modalInputWithClear, { flex: 1 }]}
-                      placeholder="e.g. 040 318 649"
+                      style={styles.largeSixthTextArea}
+                      placeholder="e.g. 040 318 649 105 882 743 219 950&#10;Paste full list or type numbers here..."
                       placeholderTextColor="#94A3B8"
-                      keyboardType="numeric"
+                      multiline={true}
+                      numberOfLines={4}
                       value={singleSixthInput}
                       onChangeText={setSingleSixthInput}
-                      onSubmitEditing={handleAddSixthNumber}
                     />
-                    <TouchableOpacity
-                      style={styles.addSixthBtn}
-                      onPress={handleAddSixthNumber}
-                    >
-                      <Plus size={16} color="#FFFFFF" />
-                      <Text style={styles.addSixthBtnText}>Add</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <TouchableOpacity
+                        style={[styles.addSixthBtn, { flex: 1, height: 42 }]}
+                        onPress={handleAddSixthNumber}
+                      >
+                        <Plus size={18} color="#FFFFFF" />
+                        <Text style={[styles.addSixthBtnText, { fontSize: 14 }]}>
+                          Add / Append Numbers
+                        </Text>
+                      </TouchableOpacity>
+                      {singleSixthInput.length > 0 && (
+                        <TouchableOpacity
+                          style={styles.clearInputTextBtn}
+                          onPress={() => setSingleSixthInput('')}
+                        >
+                          <Text style={styles.clearInputText}>Clear Box</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   </View>
 
                   {/* Sixth numbers count & Clear All */}
                   <View style={styles.sixthMetaRow}>
                     <Text style={styles.sixthCountBadge}>
-                      {sixthList.length} Numbers Entered
+                      {sixthList.length} Numbers Configured
                     </Text>
                     {sixthList.length > 0 && (
                       <TouchableOpacity
@@ -1076,32 +1094,41 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                         style={styles.clearAllSixthBtn}
                       >
                         <Trash2 size={13} color="#DC2626" />
-                        <Text style={styles.clearAllSixthText}>Clear All</Text>
+                        <Text style={styles.clearAllSixthText}>Clear All ({sixthList.length})</Text>
                       </TouchableOpacity>
                     )}
                   </View>
 
-                  {/* Sixth numbers chips grid with individual clear */}
+                  {/* Sixth numbers chips in dedicated scrollable box */}
                   {sixthList.length === 0 ? (
                     <View style={styles.emptySixthBox}>
                       <Text style={styles.emptySixthText}>
-                        No 6th prizes added yet. Type 3 digits above and tap "Add" or enter multiple numbers separated by spaces.
+                        No 6th prizes added yet. Type or paste 3-digit numbers into the box above and tap "Add / Append Numbers".
                       </Text>
                     </View>
                   ) : (
-                    <View style={styles.sixthChipsGrid}>
-                      {sixthList.map((num, idx) => (
-                        <View key={idx} style={styles.sixthChip}>
-                          <Text style={styles.sixthChipText}>{num}</Text>
-                          <TouchableOpacity
-                            style={styles.removeChipBtn}
-                            onPress={() => handleRemoveSixthNumber(idx)}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <X size={12} color="#DC2626" />
-                          </TouchableOpacity>
+                    <View style={styles.scrollableChipsWrapper}>
+                      <ScrollView
+                        style={{ maxHeight: 260 }}
+                        nestedScrollEnabled={true}
+                        showsVerticalScrollIndicator={true}
+                      >
+                        <View style={styles.sixthChipsGrid}>
+                          {sixthList.map((num, idx) => (
+                            <View key={idx} style={styles.sixthChip}>
+                              <Text style={styles.sixthChipIndex}>#{idx + 1}</Text>
+                              <Text style={styles.sixthChipText}>{num}</Text>
+                              <TouchableOpacity
+                                style={styles.removeChipBtn}
+                                onPress={() => handleRemoveSixthNumber(idx)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <X size={13} color="#DC2626" />
+                              </TouchableOpacity>
+                            </View>
+                          ))}
                         </View>
-                      ))}
+                      </ScrollView>
                     </View>
                   )}
 
@@ -1979,22 +2006,56 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
+  largeSixthTextArea: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#94A3B8',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: '#0F172A',
+    minHeight: 85,
+    textAlignVertical: 'top',
+  },
+  clearInputTextBtn: {
+    paddingHorizontal: 12,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clearInputText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  scrollableChipsWrapper: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    padding: 8,
+  },
   sixthChipsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    maxHeight: 180,
   },
   sixthChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     backgroundColor: '#EFF6FF',
     borderWidth: 1,
     borderColor: '#BFDBFE',
     borderRadius: 6,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
+  },
+  sixthChipIndex: {
+    fontSize: 10,
+    color: '#64748B',
+    fontWeight: '700',
   },
   sixthChipText: {
     fontSize: 13,
@@ -2002,9 +2063,9 @@ const styles = StyleSheet.create({
     color: '#1E40AF',
   },
   removeChipBtn: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: '#FEE2E2',
     alignItems: 'center',
     justifyContent: 'center',

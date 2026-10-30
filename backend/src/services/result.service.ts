@@ -142,30 +142,16 @@ export class ResultService {
         // 1. Evaluate 3-digit matches
         if (entry.number.length === 3) {
           if (entry.mode === 'BOX' || entry.is_box) {
-            // BOX Mode Evaluation
+            // BOX Mode Evaluation: ONLY first prize is eligible for the BOX prize!
+            // No other number (2nd, 3rd, 4th, 5th, 6th) is eligible for BOX.
             if (entry.number === clean1st) {
-              // Exact 1st Prize match: Position 1 (₹3,000, Super: ₹300)
+              // Exact 1st Prize match: Position 1
               winningPos = 'BOX_FIRST';
               rule = getRule('BOX', 'FIRST', 3000.0, 300.0);
             } else if (isBoxMatch(entry.number, clean1st)) {
-              // Permutation of 1st Prize: Positions 2..6 (₹800, Super: ₹30)
+              // Permutation of 1st Prize
               winningPos = 'BOX_OTHER';
               rule = getRule('BOX', 'SECOND', 800.0, 30.0);
-            } else if (clean2nd && isBoxMatch(entry.number, clean2nd)) {
-              winningPos = 'BOX_SECOND';
-              rule = getRule('BOX', 'SECOND', 800.0, 30.0);
-            } else if (clean3rd && isBoxMatch(entry.number, clean3rd)) {
-              winningPos = 'BOX_THIRD';
-              rule = getRule('BOX', 'THIRD', 800.0, 30.0);
-            } else if (clean4th && isBoxMatch(entry.number, clean4th)) {
-              winningPos = 'BOX_FOURTH';
-              rule = getRule('BOX', 'FOURTH', 800.0, 30.0);
-            } else if (clean5th && isBoxMatch(entry.number, clean5th)) {
-              winningPos = 'BOX_FIFTH';
-              rule = getRule('BOX', 'FIFTH', 800.0, 30.0);
-            } else if (clean6th.some((n) => isBoxMatch(entry.number, n))) {
-              winningPos = 'BOX_SIXTH';
-              rule = getRule('BOX', 'SIXTH', 800.0, 30.0);
             }
           } else {
             // SUPER Mode Evaluation

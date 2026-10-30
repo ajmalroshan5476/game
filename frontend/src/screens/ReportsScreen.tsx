@@ -510,33 +510,35 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
                   {(!data.items || data.items.length === 0) ? (
                     <Text style={styles.noData}>No winning tickets recorded for these dates.</Text>
                   ) : (
-                    data.items.map((w: any) => (
-                      <View key={w.id} style={styles.ticketCard}>
-                        <View style={styles.ticketCardTop}>
-                          <View>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <Text style={styles.winningBadgeNum}>{w.winning_number}</Text>
-                              <Text style={styles.winningPosText}>{w.prize_position}</Text>
-                              <Text style={styles.winningModeText}>[{w.mode}]</Text>
-                            </View>
-                            <Text style={styles.ticketSub}>
-                              Bill: {w.ticket_number} • Qty: {w.quantity}
-                            </Text>
-                          </View>
-                          <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={styles.ticketAmount}>Prize: ₹{w.prize_amount}</Text>
-                            <Text style={{ fontSize: 12, color: '#2563EB', fontWeight: '700' }}>
-                              Super: +₹{w.commission_amount}
-                            </Text>
-                          </View>
-                        </View>
+                    <View style={styles.excelTableContainer}>
+                      {/* Excel Header */}
+                      <View style={styles.excelTableHeader}>
+                        <Text style={[styles.excelHeaderCell, { flex: 0.8 }]}>WIN NUM</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1 }]}>POS</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 0.8 }]}>MODE</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>BILL #</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 0.6 }]}>QTY</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>PRIZE</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1, borderRightWidth: 0 }]}>SUPER</Text>
                       </View>
-                    ))
+                      {/* Excel Rows */}
+                      {data.items.map((w: any, idx: number) => (
+                        <View key={w.id || idx} style={styles.excelTableRow}>
+                          <Text style={[styles.excelTableCell, { flex: 0.8, fontWeight: '800' }]}>{w.winning_number}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1, color: colors.emeraldDark, fontWeight: '700' }]}>{w.prize_position}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 0.8 }]}>{w.mode}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.1, fontSize: 11 }]}>{w.ticket_number}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 0.6 }]}>{w.quantity}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.1, fontWeight: '700', color: '#047857' }]}>₹{w.prize_amount}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1, borderRightWidth: 0, color: '#2563EB', fontWeight: '700' }]}>₹{w.commission_amount}</Text>
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
               )}
 
-              {/* 3. WINNING REPORT (BILL WISE) */}
+              {/* 3. WINNING REPORT (BILL WISE) - Excel Table */}
               {reportType === 'bill-wise' && data && (
                 <View>
                   <Text style={styles.resultsHeading}>
@@ -545,29 +547,29 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
                   {(!Array.isArray(data) || data.length === 0) ? (
                     <Text style={styles.noData}>No winning bills found.</Text>
                   ) : (
-                    data.map((b: any) => (
-                      <View key={b.ticket_id} style={styles.ticketCard}>
-                        <View style={styles.ticketCardTop}>
-                          <View>
-                            <Text style={styles.ticketNum}>{b.ticket_number}</Text>
-                            <Text style={styles.ticketSub}>
-                              {b.game_name} ({b.draw_time}) • {b.winning_entries_count} winning hits
-                            </Text>
-                          </View>
-                          <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={styles.ticketAmount}>Prize: ₹{b.total_bill_prize}</Text>
-                            <Text style={{ fontSize: 12, color: '#2563EB', fontWeight: '700' }}>
-                              Commission: ₹{b.total_bill_commission}
-                            </Text>
-                          </View>
-                        </View>
+                    <View style={styles.excelTableContainer}>
+                      <View style={styles.excelTableHeader}>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.2 }]}>BILL #</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.5 }]}>GAME & DRAW</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 0.7 }]}>HITS</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.2 }]}>PRIZE (₹)</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.1, borderRightWidth: 0 }]}>COMM (₹)</Text>
                       </View>
-                    ))
+                      {data.map((b: any, idx: number) => (
+                        <View key={b.ticket_id || idx} style={styles.excelTableRow}>
+                          <Text style={[styles.excelTableCell, { flex: 1.2, fontWeight: '800' }]}>{b.ticket_number}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.5, fontSize: 11 }]}>{b.game_name} ({b.draw_time})</Text>
+                          <Text style={[styles.excelTableCell, { flex: 0.7, fontWeight: '700' }]}>{b.winning_entries_count}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.2, fontWeight: '700', color: '#047857' }]}>₹{b.total_bill_prize}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.1, borderRightWidth: 0, color: '#2563EB', fontWeight: '700' }]}>₹{b.total_bill_commission}</Text>
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
               )}
 
-              {/* 4. NUMBER WISE REPORT */}
+              {/* 4. NUMBER WISE REPORT - Excel Table */}
               {reportType === 'number-wise' && data && (
                 <View>
                   <Text style={styles.resultsHeading}>
@@ -576,21 +578,27 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
                   {(!Array.isArray(data) || data.length === 0) ? (
                     <Text style={styles.noData}>No numbers booked for selected criteria.</Text>
                   ) : (
-                    data.map((n: any, idx: number) => (
-                      <View key={idx} style={styles.numberRowCard}>
-                        <Text style={styles.numberColNum}>{n.number}</Text>
-                        <View style={{ flex: 1, paddingHorizontal: 12 }}>
-                          <Text style={styles.numberColQty}>{n.total_quantity} Units Sold</Text>
-                          <Text style={styles.numberColSub}>{n.booking_count} total tickets</Text>
-                        </View>
-                        <Text style={styles.numberColPrice}>₹{n.total_amount}</Text>
+                    <View style={styles.excelTableContainer}>
+                      <View style={styles.excelTableHeader}>
+                        <Text style={[styles.excelHeaderCell, { flex: 1 }]}>NUMBER</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.2 }]}>TICKETS</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.2 }]}>UNITS SOLD</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.4, borderRightWidth: 0 }]}>TOTAL SALES (₹)</Text>
                       </View>
-                    ))
+                      {data.map((n: any, idx: number) => (
+                        <View key={idx} style={styles.excelTableRow}>
+                          <Text style={[styles.excelTableCell, { flex: 1, fontWeight: '900', fontSize: 15 }]}>{n.number}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.2 }]}>{n.booking_count}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.2, fontWeight: '700' }]}>{n.total_quantity}</Text>
+                          <Text style={[styles.excelTableCell, { flex: 1.4, borderRightWidth: 0, fontWeight: '800', color: '#047857' }]}>₹{n.total_amount}</Text>
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
               )}
 
-              {/* 5. NET PAY REPORT */}
+              {/* 5. NET PAY REPORT - Excel Table */}
               {reportType === 'net-pay' && data && (
                 <View>
                   <Text style={styles.resultsHeading}>
@@ -599,45 +607,39 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
                   {(!Array.isArray(data) || data.length === 0) ? (
                     <Text style={styles.noData}>No settlement transactions found.</Text>
                   ) : (
-                    data.map((np: any, idx: number) => {
-                      const isPositive = np.netPay >= 0;
-                      return (
-                        <View key={idx} style={styles.netPayCard}>
-                          <Text style={styles.netPayTitle}>{np.gameName}</Text>
-                          <View style={styles.netPayGrid}>
-                            <View style={styles.netPayCol}>
-                              <Text style={styles.netPayLabel}>Sales Liability</Text>
-                              <Text style={styles.netPayVal}>₹{np.totalSales}</Text>
-                            </View>
-                            <View style={styles.netPayCol}>
-                              <Text style={styles.netPayLabel}>Prizes</Text>
-                              <Text style={[styles.netPayVal, { color: colors.emeraldDark }]}>
-                                ₹{np.totalPrizes}
-                              </Text>
-                            </View>
-                            <View style={styles.netPayCol}>
-                              <Text style={styles.netPayLabel}>Super Comm.</Text>
-                              <Text style={[styles.netPayVal, { color: '#2563EB' }]}>
-                                ₹{np.totalCommission}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={styles.netPayBottom}>
-                            <Text style={styles.netPayBottomLabel}>
-                              {isPositive ? 'Admin Owes User (Net):' : 'User Owes Admin (Net):'}
-                            </Text>
+                    <View style={styles.excelTableContainer}>
+                      <View style={styles.excelTableHeader}>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.4 }]}>GAME</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>SALES</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>PRIZES</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1 }]}>COMM</Text>
+                        <Text style={[styles.excelHeaderCell, { flex: 1.3, borderRightWidth: 0 }]}>NET PAY</Text>
+                      </View>
+                      {data.map((np: any, idx: number) => {
+                        const isPositive = np.netPay >= 0;
+                        return (
+                          <View key={idx} style={styles.excelTableRow}>
+                            <Text style={[styles.excelTableCell, { flex: 1.4, fontWeight: '700' }]}>{np.gameName}</Text>
+                            <Text style={[styles.excelTableCell, { flex: 1.1 }]}>₹{np.totalSales}</Text>
+                            <Text style={[styles.excelTableCell, { flex: 1.1, color: '#047857' }]}>₹{np.totalPrizes}</Text>
+                            <Text style={[styles.excelTableCell, { flex: 1, color: '#2563EB' }]}>₹{np.totalCommission}</Text>
                             <Text
                               style={[
-                                styles.netPayBottomVal,
-                                { color: isPositive ? colors.emeraldDark : '#DC2626' },
+                                styles.excelTableCell,
+                                {
+                                  flex: 1.3,
+                                  borderRightWidth: 0,
+                                  fontWeight: '900',
+                                  color: isPositive ? colors.emeraldDark : colors.danger,
+                                },
                               ]}
                             >
-                              {isPositive ? `+₹${np.netPay}` : `-₹${Math.abs(np.netPay)}`}
+                              ₹{np.netPay}
                             </Text>
                           </View>
-                        </View>
-                      );
-                    })
+                        );
+                      })}
+                    </View>
                   )}
                 </View>
               )}
@@ -1001,6 +1003,45 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '500',
     borderRightWidth: 0,
+  },
+  excelTableContainer: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  excelTableHeader: {
+    backgroundColor: '#0084FF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  excelHeaderCell: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'center',
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255,255,255,0.3)',
+    paddingHorizontal: 4,
+  },
+  excelTableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+  },
+  excelTableCell: {
+    paddingVertical: 9,
+    paddingHorizontal: 4,
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+    color: '#1E293B',
+    fontSize: 12,
+    textAlign: 'center',
   },
   ticketCard: {
     backgroundColor: '#FFFFFF',
