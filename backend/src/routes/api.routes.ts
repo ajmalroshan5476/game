@@ -5,6 +5,7 @@ import { LimitService } from '../services/limit.service.js';
 import { ResultService } from '../services/result.service.js';
 import { FinanceService } from '../services/finance.service.js';
 import { ReportService } from '../services/report.service.js';
+import { PricingService } from '../services/pricing.service.js';
 import { query } from '../db/pool.js';
 import { getISTDateString } from '../utils/time.js';
 import bcrypt from 'bcryptjs';
@@ -409,6 +410,31 @@ export async function apiRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // Edit / Update existing official results
+  fastify.put('/api/admin/results/:drawId', { preHandler: requireAdmin }, async (req, reply) => {
+    const { orgId, userId } = req.user!;
+    const { drawId } = req.params as any;
+    const payload = (req.body as any) || {};
+
+    if (!drawId || !payload?.firstPrize) {
+      return reply.status(400).send({ error: 'drawId and firstPrize are required' });
+    }
+
+    try {
+      const summary = await ResultService.publishResult(orgId, userId, {
+        ...payload,
+        drawId,
+      });
+      return reply.status(200).send({
+        success: true,
+        message: 'Winning numbers updated and winners re-calculated immediately',
+        ...summary,
+      });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
   // --------------------------------------------------------------------------
   // 6. Settlements and Financial Ledger
   // --------------------------------------------------------------------------
@@ -511,7 +537,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
 
   fastify.post('/api/admin/users', { preHandler: requireAdmin }, async (req, reply) => {
     const { orgId, userId: adminId } = req.user!;
-    const { username, initialPassword } = (req.body as any) || {};
+    const { username, initialPassword, ticketPrices } = (req.body as any) || {};
 
     if (!username || !initialPassword) {
       return reply.status(400).send({ error: '4-character username and initialPassword are required' });
@@ -519,6 +545,12 @@ export async function apiRoutes(fastify: FastifyInstance) {
 
     try {
       const newUser = await AuthService.createUser(orgId, adminId, username, initialPassword);
+
+      // Save custom ticket prices if provided right during user creation
+      if (Array.isArray(ticketPrices) && ticketPrices.length > 0) {
+        await PricingService.setUserPrices(orgId, newUser.id, ticketPrices);
+      }
+
       return reply.status(201).send({ user: newUser });
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
@@ -549,5 +581,90 @@ export async function apiRoutes(fastify: FastifyInstance) {
 
     await AuthService.resetPassword(orgId, id, newPassword);
     return { success: true, message: 'Password reset successfully' };
+  });
+
+  // --------------------------------------------------------------------------
+  // 9. Individual User Ticket Pricing
+  // --------------------------------------------------------------------------
+  fastify.get('/api/admin/users/:id/prices', { preHandler: requireAdmin }, async (req, reply) => {
+    const { orgId } = req.user!;
+    const { id } = req.params as any;
+
+    try {
+      const prices = await PricingService.getUserPrices(orgId, id);
+      return { prices };
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  fastify.post('/api/admin/users/:id/prices', { preHandler: requireAdmin }, async (req, reply) => {
+    const { orgId } = req.user!;
+    const { id } = req.params as any;
+    const { prices } = (req.body as any) || {};
+
+    if (!Array.isArray(prices)) {
+      return reply.status(400).send({ error: 'prices array is required' });
+    }
+
+    try {
+      const result = await PricingService.setUserPrices(orgId, id, prices);
+      return { success: true, ...result };
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  fastify.get('/api/users/me/prices', { preHandler: authenticate }, async (req) => {
+    const { orgId, userId } = req.user!;
+    const prices = await PricingService.getUserPrices(orgId, userId);
+    return { prices };
+  });
+
+  // --------------------------------------------------------------------------
+  // 10. Universal Game Range Limits
+  // --------------------------------------------------------------------------
+  fastify.get('/api/admin/game-limits', { preHandler: requireAdmin }, async (req) => {
+    const { orgId } = req.user!;
+    const { gameId } = (req.query as any) || {};
+    const limits = await LimitService.getGameRangeLimits(orgId, gameId);
+    return { limits };
+  });
+
+  fastify.post('/api/admin/game-limits', { preHandler: requireAdmin }, async (req, reply) => {
+    const { orgId } = req.user!;
+    const { gameId, digitType, startRange, endRange, maxCap } = (req.body as any) || {};
+
+    if (!gameId || digitType === undefined || !startRange || !endRange || maxCap === undefined) {
+      return reply.status(400).send({
+        error: 'gameId, digitType (1,2,3), startRange, endRange, and maxCap are required',
+      });
+    }
+
+    try {
+      const created = await LimitService.setGameRangeLimit(
+        orgId,
+        gameId,
+        parseInt(digitType, 10),
+        String(startRange),
+        String(endRange),
+        parseInt(maxCap, 10)
+      );
+      return reply.status(201).send({ success: true, limit: created });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  fastify.delete('/api/admin/game-limits/:id', { preHandler: requireAdmin }, async (req, reply) => {
+    const { orgId } = req.user!;
+    const { id } = req.params as any;
+
+    try {
+      await LimitService.deleteGameRangeLimit(orgId, id);
+      return { success: true };
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
   });
 }

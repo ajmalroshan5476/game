@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { PricingService } from './pricing.service.js';
 
 export type TicketMode = 'A' | 'B' | 'C' | 'AB' | 'AC' | 'BC' | 'SUPER' | 'BOX';
 
@@ -54,7 +55,7 @@ export class LimitExceededError extends Error {
     remaining: number;
   }) {
     super(
-      `Ticket rejected: Number ${data.number} has a maximum limit of ${data.maxQuantity} units. Currently accepted: ${data.currentlyAccepted}. Requested: ${data.requested}. Remaining: ${data.remaining}.`
+      `Ticket rejected: Number ${data.number} has reached capacity (Max cap: ${data.maxQuantity} units, currently accepted: ${data.currentlyAccepted}, remaining: ${data.remaining}). Total users limit reached.`
     );
     this.name = 'LimitExceededError';
     this.number = data.number;
@@ -67,9 +68,13 @@ export class LimitExceededError extends Error {
 
 export class TicketService {
   /**
-   * Expand single entries and ranges into normalized individual ticket entries
+   * Expand single entries and ranges into normalized individual ticket entries with per-user pricing
    */
-  static expandEntries(rawEntries: EntryInput[], unitRate: number) {
+  static expandEntries(
+    rawEntries: EntryInput[],
+    unitRate: number,
+    priceMap?: Map<string, number>
+  ) {
     const expanded: Array<{
       number: string;
       quantity: number;
@@ -78,6 +83,13 @@ export class TicketService {
       unitPrice: number;
       totalPrice: number;
     }> = [];
+
+    const getPrice = (mode: string) => {
+      if (priceMap && priceMap.has(mode)) {
+        return priceMap.get(mode)!;
+      }
+      return (mode === 'A' || mode === 'B' || mode === 'C') ? 12.0 : unitRate;
+    };
 
     for (const entry of rawEntries) {
       const qty = Math.floor(entry.quantity);
@@ -102,7 +114,7 @@ export class TicketService {
         for (let n = start; n <= end; n++) {
           const numStr = String(n).padStart(padLen, '0');
           const { mode, isBox } = normalizeModeForNumber(numStr, entry.mode, entry.isBox);
-          const effectiveRate = (mode === 'A' || mode === 'B' || mode === 'C') ? 12.0 : unitRate;
+          const effectiveRate = getPrice(mode);
           expanded.push({
             number: numStr,
             quantity: qty,
@@ -116,7 +128,7 @@ export class TicketService {
         const numStr = entry.number.trim();
         if (!numStr) throw new Error('Number is required for single entry');
         const { mode, isBox } = normalizeModeForNumber(numStr, entry.mode, entry.isBox);
-        const effectiveRate = (mode === 'A' || mode === 'B' || mode === 'C') ? 12.0 : unitRate;
+        const effectiveRate = getPrice(mode);
         expanded.push({
           number: numStr,
           quantity: qty,
@@ -194,15 +206,16 @@ export class TicketService {
         );
       }
 
-      // 3. Get active unit rate
+      // 3. Get user-specific pricing for this game and category
       const schemeRes = await client.query(
         `SELECT unit_rate FROM prize_schemes WHERE org_id = $1 AND is_active = TRUE LIMIT 1`,
         [orgId]
       );
       const unitRate = schemeRes.rows.length > 0 ? parseFloat(schemeRes.rows[0].unit_rate) : 10.0;
+      const userPriceMap = await PricingService.getEffectivePriceMap(orgId, userId, draw.game_id);
 
-      // 4. Expand entries
-      const expandedEntries = this.expandEntries(payload.entries, unitRate);
+      // 4. Expand entries with user-specific prices
+      const expandedEntries = this.expandEntries(payload.entries, unitRate, userPriceMap);
 
       // 5. Aggregate requested quantities per number
       const requestedByNumber = new Map<string, number>();
@@ -243,7 +256,7 @@ export class TicketService {
         acceptedMap.set(row.number, parseInt(row.accepted_quantity, 10));
       }
 
-      // 8. Query configured limits for this draw
+      // 8. Query configured draw-specific limits
       const limitRows = await client.query(
         `SELECT number, max_quantity
          FROM number_limits
@@ -254,6 +267,32 @@ export class TicketService {
       const maxLimitMap = new Map<string, number>();
       for (const row of limitRows.rows) {
         maxLimitMap.set(row.number, parseInt(row.max_quantity, 10));
+      }
+
+      // 8b. Query Universal Game Range Limits for this game (single, double, triple digits)
+      const rangeLimitsRes = await client.query(
+        `SELECT digit_type, start_range, end_range, max_cap
+         FROM game_range_limits
+         WHERE org_id = $1 AND game_id = $2`,
+        [orgId, draw.game_id]
+      );
+
+      for (const num of sortedNumbers) {
+        const numVal = parseInt(num, 10);
+        for (const rl of rangeLimitsRes.rows) {
+          if (num.length === parseInt(rl.digit_type, 10)) {
+            const startVal = parseInt(rl.start_range, 10);
+            const endVal = parseInt(rl.end_range, 10);
+            if (numVal >= startVal && numVal <= endVal) {
+              const cap = parseInt(rl.max_cap, 10);
+              if (cap === 0) {
+                throw new Error(`Ticket rejected: Number ${num} is currently blocked for this game`);
+              }
+              const currentCap = maxLimitMap.get(num);
+              maxLimitMap.set(num, currentCap !== undefined ? Math.min(currentCap, cap) : cap);
+            }
+          }
+        }
       }
 
       // 9. Enforce limits
@@ -287,11 +326,14 @@ export class TicketService {
         );
       }
 
-      // 11. Generate unique ticket number with TKT suffix: YYMMDDHHmmss-XXXX-TKT
-      const datePart = now.toISOString().slice(2, 10).replace(/-/g, '');
-      const timePart = now.toTimeString().slice(0, 8).replace(/:/g, '');
-      const randomPart = Math.floor(1000 + Math.random() * 9000);
-      const ticketNumber = `${datePart}${timePart}-${randomPart}-TKT`;
+      // 11. Generate clean Bill Number matching screenshot (e.g. 2118921)
+      const baseBill = 2100000 + Math.floor(Math.random() * 890000);
+      let ticketNumber = `${baseBill}`;
+      // Verify uniqueness
+      const checkExist = await client.query(`SELECT id FROM tickets WHERE ticket_number = $1`, [ticketNumber]);
+      if (checkExist.rows.length > 0) {
+        ticketNumber = `${baseBill}${Math.floor(10 + Math.random() * 89)}`;
+      }
 
       // 12. Insert ticket header
       const ticketRes = await client.query(

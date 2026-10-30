@@ -13,6 +13,7 @@ import {
   SafeAreaView,
   StatusBar,
   Share,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -31,6 +32,9 @@ import {
   AlertCircle,
   User,
   Award,
+  Edit3,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react-native';
 
 interface ResultsScreenProps {
@@ -63,15 +67,18 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
   // Modals for Dropdowns
   const [pickerModal, setPickerModal] = useState<'game' | 'mode' | null>(null);
 
-  // Admin Publish Modal
+  // Admin Publish & Edit Result Modal State
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const [isEditingResult, setIsEditingResult] = useState(false);
+  const [publishStep, setPublishStep] = useState<'prizes1to5' | 'sixthPrizes'>('prizes1to5');
   const [publishDrawId, setPublishDrawId] = useState('');
   const [firstPrize, setFirstPrize] = useState('');
   const [secondPrize, setSecondPrize] = useState('');
   const [thirdPrize, setThirdPrize] = useState('');
   const [fourthPrize, setFourthPrize] = useState('');
   const [fifthPrize, setFifthPrize] = useState('');
-  const [sixthPrizes, setSixthPrizes] = useState('');
+  const [sixthList, setSixthList] = useState<string[]>([]);
+  const [singleSixthInput, setSingleSixthInput] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [drawsList, setDrawsList] = useState<any[]>([]);
 
@@ -211,7 +218,70 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     }
   };
 
-  // Admin Publish Handler
+  const openNewPublishModal = () => {
+    setIsEditingResult(false);
+    setPublishStep('prizes1to5');
+    setFirstPrize('');
+    setSecondPrize('');
+    setThirdPrize('');
+    setFourthPrize('');
+    setFifthPrize('');
+    setSixthList([]);
+    setSingleSixthInput('');
+    if (drawsList.length > 0) {
+      setPublishDrawId(drawsList[0].id);
+    }
+    setShowPublishModal(true);
+  };
+
+  const openEditResultModal = () => {
+    if (!currentResult) return;
+    setIsEditingResult(true);
+    setPublishStep('prizes1to5');
+    setPublishDrawId(currentResult.draw_id);
+    setFirstPrize(currentResult.first_prize || '');
+    setSecondPrize(currentResult.second_prize || '');
+    setThirdPrize(currentResult.third_prize || '');
+    setFourthPrize(currentResult.fourth_prize || '');
+    setFifthPrize(currentResult.fifth_prize || '');
+
+    let sixth: string[] = [];
+    if (Array.isArray(currentResult.sixth_prizes)) {
+      sixth = currentResult.sixth_prizes;
+    } else if (typeof currentResult.sixth_prizes === 'string') {
+      try {
+        sixth = JSON.parse(currentResult.sixth_prizes);
+      } catch {
+        sixth = currentResult.sixth_prizes.split(/[,\s]+/).filter(Boolean);
+      }
+    }
+    setSixthList(sixth);
+    setSingleSixthInput('');
+    setShowPublishModal(true);
+  };
+
+  const handleAddSixthNumber = () => {
+    const raw = singleSixthInput.trim();
+    if (!raw) return;
+    const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
+    const newItems: string[] = [];
+    for (const p of parts) {
+      const padded = p.padStart(3, '0').slice(-3);
+      if (!sixthList.includes(padded) && !newItems.includes(padded)) {
+        newItems.push(padded);
+      }
+    }
+    if (newItems.length > 0) {
+      setSixthList((prev) => [...prev, ...newItems]);
+      setSingleSixthInput('');
+    }
+  };
+
+  const handleRemoveSixthNumber = (index: number) => {
+    setSixthList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Admin Publish & Update Result Handler
   const handlePublish = async () => {
     if (!publishDrawId || !firstPrize.trim()) {
       Alert.alert('Required Fields', 'Draw and 1st Prize are required');
@@ -220,24 +290,26 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
 
     setPublishing(true);
     try {
-      const sixthArr = sixthPrizes
-        .split(/[,\s]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      const res = await api.publishResult({
+      const payload = {
         drawId: publishDrawId,
         firstPrize: firstPrize.trim(),
         secondPrize: secondPrize.trim() || undefined,
         thirdPrize: thirdPrize.trim() || undefined,
         fourthPrize: fourthPrize.trim() || undefined,
         fifthPrize: fifthPrize.trim() || undefined,
-        sixthPrizes: sixthArr.length > 0 ? sixthArr : undefined,
-      });
+        sixthPrizes: sixthList.length > 0 ? sixthList : undefined,
+      };
+
+      let res;
+      if (isEditingResult) {
+        res = await api.updateResult(publishDrawId, payload);
+      } else {
+        res = await api.publishResult(payload);
+      }
 
       Alert.alert(
-        'Result Published Successfully!',
-        `Winners Generated: ${res.totalWinners}\nTotal Prize Payout: ₹${res.totalPrizePayout}\nTotal Commission: ₹${res.totalCommissionPayout}`
+        isEditingResult ? 'Results Updated Successfully!' : 'Result Published Successfully!',
+        `Winners Generated: ${res.totalWinners ?? res.summary?.totalWinners ?? 0}\nTotal Prize Payout: ₹${res.totalPrizePayout ?? res.summary?.totalPrize ?? 0}\nTotal Commission: ₹${res.totalCommissionPayout ?? res.summary?.totalCommission ?? 0}`
       );
 
       const targetDrawId = publishDrawId;
@@ -247,18 +319,19 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
       setThirdPrize('');
       setFourthPrize('');
       setFifthPrize('');
-      setSixthPrizes('');
+      setSixthList([]);
+      setSingleSixthInput('');
 
+      // Immediately re-fetch and reflect in results board & checking tab
       if (selectedGame) {
-        fetchResultsForGame(selectedGame.id, dateInput);
+        await fetchResultsForGame(selectedGame.id, dateInput);
       }
 
-      // Automatically switch to Result Checking tab to verify winning numbers & usernames
       setActiveTab('checking');
       setCheckingDrawId(targetDrawId);
       await loadResultChecking(targetDrawId);
     } catch (err: any) {
-      Alert.alert('Publish Error', err.message || 'Failed to publish results');
+      Alert.alert('Save Error', err.message || 'Failed to save results');
     } finally {
       setPublishing(false);
     }
@@ -305,15 +378,26 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
 
         <Text style={styles.headerTitle}>Results</Text>
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           {user?.role === 'ADMIN' && (
-            <TouchableOpacity
-              style={styles.adminPublishBtn}
-              onPress={() => setShowPublishModal(true)}
-            >
-              <Plus size={16} color="#FFFFFF" strokeWidth={2.5} />
-              <Text style={styles.adminPublishBtnText}>Publish</Text>
-            </TouchableOpacity>
+            <>
+              {currentResult && (
+                <TouchableOpacity
+                  style={styles.adminEditBtn}
+                  onPress={openEditResultModal}
+                >
+                  <Edit3 size={15} color="#007BFF" strokeWidth={2.4} />
+                  <Text style={styles.adminEditBtnText}>Edit</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.adminPublishBtn}
+                onPress={openNewPublishModal}
+              >
+                <Plus size={16} color="#FFFFFF" strokeWidth={2.5} />
+                <Text style={styles.adminPublishBtnText}>Publish</Text>
+              </TouchableOpacity>
+            </>
           )}
 
           {/* WhatsApp Icon matching screenshot top right */}
@@ -750,122 +834,305 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
         </TouchableOpacity>
       </Modal>
 
-      {/* MODAL 3: ADMIN PUBLISH RESULTS */}
+      {/* MODAL 3: ADMIN PUBLISH & EDIT WINNING RESULTS */}
       <Modal visible={showPublishModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.publishModalCard}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.publishModalCard, { maxHeight: '90%' }]}>
+            {/* Header */}
             <View style={styles.publishModalHeader}>
-              <Text style={styles.publishModalTitle}>Publish Official Results</Text>
+              <View>
+                <Text style={styles.publishModalTitle}>
+                  {isEditingResult ? 'Edit Winning Results' : 'Publish Official Results'}
+                </Text>
+                <Text style={styles.publishModalSub}>
+                  {isEditingResult
+                    ? 'Clear mistake & replace with correct number. Updates immediately.'
+                    : '1st to 5th prize enterable first, all 6th prizes later.'}
+                </Text>
+              </View>
               <TouchableOpacity onPress={() => setShowPublishModal(false)}>
                 <X size={20} color="#64748B" />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
-              {/* Select Draw */}
-              <Text style={styles.inputLabel}>Select Game Draw</Text>
-              <View style={styles.drawSelectRow}>
-                {drawsList.slice(0, 4).map((d) => (
-                  <TouchableOpacity
-                    key={d.id}
-                    style={[
-                      styles.drawPill,
-                      publishDrawId === d.id && styles.drawPillActive,
-                    ]}
-                    onPress={() => setPublishDrawId(d.id)}
-                  >
-                    <Text
-                      style={[
-                        styles.drawPillText,
-                        publishDrawId === d.id && styles.drawPillTextActive,
-                      ]}
-                    >
-                      {d.game_name} ({d.draw_time})
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={styles.inputLabel}>1st Prize (3 Digits)*</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. 737"
-                placeholderTextColor="#94A3B8"
-                maxLength={3}
-                keyboardType="numeric"
-                value={firstPrize}
-                onChangeText={setFirstPrize}
-              />
-
-              <Text style={styles.inputLabel}>2nd Prize (3 Digits)</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. 015"
-                placeholderTextColor="#94A3B8"
-                maxLength={3}
-                keyboardType="numeric"
-                value={secondPrize}
-                onChangeText={setSecondPrize}
-              />
-
-              <Text style={styles.inputLabel}>3rd Prize (3 Digits)</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. 221"
-                placeholderTextColor="#94A3B8"
-                maxLength={3}
-                keyboardType="numeric"
-                value={thirdPrize}
-                onChangeText={setThirdPrize}
-              />
-
-              <Text style={styles.inputLabel}>4th Prize (3 Digits)</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. 095"
-                placeholderTextColor="#94A3B8"
-                maxLength={3}
-                keyboardType="numeric"
-                value={fourthPrize}
-                onChangeText={setFourthPrize}
-              />
-
-              <Text style={styles.inputLabel}>5th Prize (3 Digits)</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. 342"
-                placeholderTextColor="#94A3B8"
-                maxLength={3}
-                keyboardType="numeric"
-                value={fifthPrize}
-                onChangeText={setFifthPrize}
-              />
-
-              <Text style={styles.inputLabel}>6th Prizes (Separated by comma or space)</Text>
-              <TextInput
-                style={[styles.modalInput, { height: 70 }]}
-                placeholder="040, 318, 649, 065, 350, 669, 085, 406, 761..."
-                placeholderTextColor="#94A3B8"
-                multiline
-                value={sixthPrizes}
-                onChangeText={setSixthPrizes}
-              />
-
+            {/* Phased Step Switcher */}
+            <View style={styles.stepSwitcherRow}>
               <TouchableOpacity
-                style={styles.publishActionBtn}
-                activeOpacity={0.85}
-                onPress={handlePublish}
-                disabled={publishing}
+                style={[styles.stepTabBtn, publishStep === 'prizes1to5' && styles.stepTabBtnActive]}
+                onPress={() => setPublishStep('prizes1to5')}
               >
-                {publishing ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.publishActionBtnText}>Publish & Calculate Winners</Text>
-                )}
+                <Text
+                  style={[
+                    styles.stepTabBtnText,
+                    publishStep === 'prizes1to5' && styles.stepTabBtnTextActive,
+                  ]}
+                >
+                  Step 1: Prizes 1 - 5
+                </Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.stepTabBtn, publishStep === 'sixthPrizes' && styles.stepTabBtnActive]}
+                onPress={() => setPublishStep('sixthPrizes')}
+              >
+                <Text
+                  style={[
+                    styles.stepTabBtnText,
+                    publishStep === 'sixthPrizes' && styles.stepTabBtnTextActive,
+                  ]}
+                >
+                  Step 2: 6th Prizes ({sixthList.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={true} style={{ flexGrow: 0, maxHeight: 440 }}>
+              {publishStep === 'prizes1to5' ? (
+                <View>
+                  {/* Select Draw (if not editing) */}
+                  {!isEditingResult && (
+                    <>
+                      <Text style={styles.inputLabel}>Select Game Draw</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                        {drawsList.slice(0, 6).map((d) => (
+                          <TouchableOpacity
+                            key={d.id}
+                            style={[
+                              styles.drawPill,
+                              publishDrawId === d.id && styles.drawPillActive,
+                            ]}
+                            onPress={() => setPublishDrawId(d.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.drawPillText,
+                                publishDrawId === d.id && styles.drawPillTextActive,
+                              ]}
+                            >
+                              {d.game_name} ({d.draw_time})
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </>
+                  )}
+
+                  {/* 1st Prize */}
+                  <Text style={styles.inputLabel}>1st Prize (3 Digits)*</Text>
+                  <View style={styles.inputWithClearRow}>
+                    <TextInput
+                      style={styles.modalInputWithClear}
+                      placeholder="e.g. 737"
+                      placeholderTextColor="#94A3B8"
+                      maxLength={3}
+                      keyboardType="numeric"
+                      value={firstPrize}
+                      onChangeText={setFirstPrize}
+                    />
+                    {firstPrize.length > 0 && (
+                      <TouchableOpacity
+                        style={styles.clearFieldBtn}
+                        onPress={() => setFirstPrize('')}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <X size={15} color="#DC2626" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* 2nd Prize */}
+                  <Text style={styles.inputLabel}>2nd Prize (3 Digits)</Text>
+                  <View style={styles.inputWithClearRow}>
+                    <TextInput
+                      style={styles.modalInputWithClear}
+                      placeholder="e.g. 015"
+                      placeholderTextColor="#94A3B8"
+                      maxLength={3}
+                      keyboardType="numeric"
+                      value={secondPrize}
+                      onChangeText={setSecondPrize}
+                    />
+                    {secondPrize.length > 0 && (
+                      <TouchableOpacity
+                        style={styles.clearFieldBtn}
+                        onPress={() => setSecondPrize('')}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <X size={15} color="#DC2626" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* 3rd Prize */}
+                  <Text style={styles.inputLabel}>3rd Prize (3 Digits)</Text>
+                  <View style={styles.inputWithClearRow}>
+                    <TextInput
+                      style={styles.modalInputWithClear}
+                      placeholder="e.g. 221"
+                      placeholderTextColor="#94A3B8"
+                      maxLength={3}
+                      keyboardType="numeric"
+                      value={thirdPrize}
+                      onChangeText={setThirdPrize}
+                    />
+                    {thirdPrize.length > 0 && (
+                      <TouchableOpacity
+                        style={styles.clearFieldBtn}
+                        onPress={() => setThirdPrize('')}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <X size={15} color="#DC2626" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* 4th Prize */}
+                  <Text style={styles.inputLabel}>4th Prize (3 Digits)</Text>
+                  <View style={styles.inputWithClearRow}>
+                    <TextInput
+                      style={styles.modalInputWithClear}
+                      placeholder="e.g. 095"
+                      placeholderTextColor="#94A3B8"
+                      maxLength={3}
+                      keyboardType="numeric"
+                      value={fourthPrize}
+                      onChangeText={setFourthPrize}
+                    />
+                    {fourthPrize.length > 0 && (
+                      <TouchableOpacity
+                        style={styles.clearFieldBtn}
+                        onPress={() => setFourthPrize('')}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <X size={15} color="#DC2626" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* 5th Prize */}
+                  <Text style={styles.inputLabel}>5th Prize (3 Digits)</Text>
+                  <View style={styles.inputWithClearRow}>
+                    <TextInput
+                      style={styles.modalInputWithClear}
+                      placeholder="e.g. 342"
+                      placeholderTextColor="#94A3B8"
+                      maxLength={3}
+                      keyboardType="numeric"
+                      value={fifthPrize}
+                      onChangeText={setFifthPrize}
+                    />
+                    {fifthPrize.length > 0 && (
+                      <TouchableOpacity
+                        style={styles.clearFieldBtn}
+                        onPress={() => setFifthPrize('')}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <X size={15} color="#DC2626" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Action to proceed to 6th prizes */}
+                  <TouchableOpacity
+                    style={styles.nextStepBtn}
+                    onPress={() => setPublishStep('sixthPrizes')}
+                  >
+                    <Text style={styles.nextStepBtnText}>Next: Enter 6th Prizes ({sixthList.length}) →</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View>
+                  {/* Step 2: All 6th Prizes Later */}
+                  <Text style={styles.inputLabel}>Add 6th Prize (3 Digits or space/comma separated)</Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                    <TextInput
+                      style={[styles.modalInputWithClear, { flex: 1 }]}
+                      placeholder="e.g. 040 318 649"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="numeric"
+                      value={singleSixthInput}
+                      onChangeText={setSingleSixthInput}
+                      onSubmitEditing={handleAddSixthNumber}
+                    />
+                    <TouchableOpacity
+                      style={styles.addSixthBtn}
+                      onPress={handleAddSixthNumber}
+                    >
+                      <Plus size={16} color="#FFFFFF" />
+                      <Text style={styles.addSixthBtnText}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Sixth numbers count & Clear All */}
+                  <View style={styles.sixthMetaRow}>
+                    <Text style={styles.sixthCountBadge}>
+                      {sixthList.length} Numbers Entered
+                    </Text>
+                    {sixthList.length > 0 && (
+                      <TouchableOpacity
+                        onPress={() => setSixthList([])}
+                        style={styles.clearAllSixthBtn}
+                      >
+                        <Trash2 size={13} color="#DC2626" />
+                        <Text style={styles.clearAllSixthText}>Clear All</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Sixth numbers chips grid with individual clear */}
+                  {sixthList.length === 0 ? (
+                    <View style={styles.emptySixthBox}>
+                      <Text style={styles.emptySixthText}>
+                        No 6th prizes added yet. Type 3 digits above and tap "Add" or enter multiple numbers separated by spaces.
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.sixthChipsGrid}>
+                      {sixthList.map((num, idx) => (
+                        <View key={idx} style={styles.sixthChip}>
+                          <Text style={styles.sixthChipText}>{num}</Text>
+                          <TouchableOpacity
+                            style={styles.removeChipBtn}
+                            onPress={() => handleRemoveSixthNumber(idx)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <X size={12} color="#DC2626" />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+                    <TouchableOpacity
+                      style={styles.backStepBtn}
+                      onPress={() => setPublishStep('prizes1to5')}
+                    >
+                      <Text style={styles.backStepBtnText}>← Back to 1st-5th</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.publishActionBtn, { flex: 1.5, marginTop: 0 }]}
+                      activeOpacity={0.85}
+                      onPress={handlePublish}
+                      disabled={publishing}
+                    >
+                      {publishing ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <Text style={styles.publishActionBtnText}>
+                          {isEditingResult ? 'Save & Update Result' : 'Publish & Calculate Winners'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1550,5 +1817,196 @@ const styles = StyleSheet.create({
   winnerBillText: {
     fontSize: 11,
     color: '#94A3B8',
+  },
+  adminEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  adminEditBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#007BFF',
+  },
+  publishModalSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  stepSwitcherRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    padding: 3,
+    marginBottom: 14,
+    marginTop: 8,
+  },
+  stepTabBtn: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  stepTabBtnActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  stepTabBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  stepTabBtnTextActive: {
+    color: '#007BFF',
+    fontWeight: '700',
+  },
+  inputWithClearRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'relative',
+    marginBottom: 10,
+  },
+  modalInputWithClear: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+    color: '#0F172A',
+    fontWeight: '700',
+  },
+  clearFieldBtn: {
+    position: 'absolute',
+    right: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nextStepBtn: {
+    backgroundColor: '#007BFF',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  nextStepBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  backStepBtn: {
+    flex: 1,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  backStepBtnText: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  addSixthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#059669',
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    justifyContent: 'center',
+  },
+  addSixthBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  sixthMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sixthCountBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  clearAllSixthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: '#FEF2F2',
+  },
+  clearAllSixthText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  emptySixthBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 16,
+    alignItems: 'center',
+  },
+  emptySixthText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  sixthChipsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    maxHeight: 180,
+  },
+  sixthChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  sixthChipText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E40AF',
+  },
+  removeChipBtn: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

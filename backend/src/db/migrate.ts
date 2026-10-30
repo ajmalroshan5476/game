@@ -245,6 +245,43 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id);
     `);
 
+    // 13. User Custom Ticket Prices (Per User, Per Game, Per Category/Mode)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_ticket_prices (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        game_id UUID REFERENCES games(id) ON DELETE CASCADE,
+        mode VARCHAR(20) NOT NULL,
+        price NUMERIC(10, 2) NOT NULL,
+        commission NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_user_game_mode_unique ON user_ticket_prices (
+        user_id,
+        COALESCE(game_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        mode
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_prices_lookup ON user_ticket_prices(user_id, game_id, mode);
+    `);
+
+    // 14. Universal Game Range Limits (Per Game, Digit Types 1, 2, 3, Range Start to End, Max Cap)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS game_range_limits (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        game_id UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        digit_type INT NOT NULL,
+        start_range VARCHAR(10) NOT NULL,
+        end_range VARCHAR(10) NOT NULL,
+        max_cap INT NOT NULL CHECK (max_cap >= 0),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_game_range_limits ON game_range_limits(org_id, game_id, digit_type);
+    `);
+
     await client.query('COMMIT');
     console.log('Database migrations completed successfully.');
   } catch (err) {

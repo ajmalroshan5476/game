@@ -69,7 +69,7 @@ export class ReportService {
       SELECT t.id, t.ticket_number, t.customer_name, t.total_quantity, t.total_amount,
              t.status, t.created_at,
              d.draw_date, d.draw_time,
-             g.name AS game_name, g.color AS game_color,
+             g.name AS game_name, g.code AS game_code, g.color AS game_color,
              u.username AS seller_username,
              (
                SELECT json_agg(json_build_object(
@@ -77,6 +77,7 @@ export class ReportService {
                  'quantity', te.quantity,
                  'mode', te.mode,
                  'is_box', te.is_box,
+                 'unit_price', te.unit_price,
                  'total_price', te.total_price
                ) ORDER BY te.created_at ASC)
                FROM ticket_entries te

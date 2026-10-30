@@ -114,4 +114,75 @@ export class LimitService {
       client.release();
     }
   }
+
+  // --------------------------------------------------------------------------
+  // Universal Game Range Limits (e.g. 000-999 cap 100, 00-99, 0-9, or block cap 0)
+  // --------------------------------------------------------------------------
+  static async setGameRangeLimit(
+    orgId: string,
+    gameId: string,
+    digitType: number,
+    startRange: string,
+    endRange: string,
+    maxCap: number
+  ) {
+    if (!gameId) throw new Error('Game is required');
+    if (![1, 2, 3].includes(digitType)) throw new Error('Digit type must be 1, 2, or 3');
+    const start = parseInt(startRange, 10);
+    const end = parseInt(endRange, 10);
+    if (isNaN(start) || isNaN(end) || start > end) {
+      throw new Error(`Invalid range: ${startRange} to ${endRange}`);
+    }
+    if (maxCap < 0) {
+      throw new Error('Max cap must be non-negative (0 means blocked)');
+    }
+
+    const cleanStart = String(start).padStart(digitType, '0');
+    const cleanEnd = String(end).padStart(digitType, '0');
+
+    const res = await query(
+      `INSERT INTO game_range_limits (org_id, game_id, digit_type, start_range, end_range, max_cap, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING id, game_id, digit_type, start_range, end_range, max_cap, created_at`,
+      [orgId, gameId, digitType, cleanStart, cleanEnd, maxCap]
+    );
+
+    return res.rows[0];
+  }
+
+  static async getGameRangeLimits(orgId: string, gameId?: string) {
+    let sql = `
+      SELECT grl.id, grl.game_id, grl.digit_type, grl.start_range, grl.end_range, grl.max_cap, grl.created_at,
+             g.name AS game_name, g.code AS game_code
+      FROM game_range_limits grl
+      JOIN games g ON g.id = grl.game_id
+      WHERE grl.org_id = $1
+    `;
+    const params: any[] = [orgId];
+
+    if (gameId && gameId !== 'ALL') {
+      params.push(gameId);
+      sql += ` AND grl.game_id = $2`;
+    }
+
+    sql += ` ORDER BY g.name ASC, grl.digit_type ASC, grl.start_range ASC`;
+    const res = await query(sql, params);
+    return res.rows.map((r) => ({
+      id: r.id,
+      gameId: r.game_id,
+      gameName: r.game_name,
+      gameCode: r.game_code,
+      digitType: parseInt(r.digit_type, 10),
+      startRange: r.start_range,
+      endRange: r.end_range,
+      maxCap: parseInt(r.max_cap, 10),
+      createdAt: r.created_at,
+    }));
+  }
+
+  static async deleteGameRangeLimit(orgId: string, id: string) {
+    await query(`DELETE FROM game_range_limits WHERE id = $1 AND org_id = $2`, [id, orgId]);
+    return { success: true };
+  }
 }
+

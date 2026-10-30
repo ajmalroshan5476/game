@@ -10,17 +10,43 @@ import {
   Alert,
   Modal,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { api } from '../api/client';
 import { colors } from '../theme/colors';
-import { ArrowLeft, UserPlus, KeyRound, CheckCircle2, XCircle, Shield } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  UserPlus,
+  KeyRound,
+  CheckCircle2,
+  XCircle,
+  Shield,
+  Tag,
+  Coins,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
+  Save,
+} from 'lucide-react-native';
 
 interface ManageUsersScreenProps {
   onBack: () => void;
 }
 
+const DEFAULT_CATEGORIES = [
+  { mode: 'SUPER', label: 'SUPER (3 Digits)', group: 'Group 3', defaultPrice: '10' },
+  { mode: 'BOX', label: 'BOX (3 Digits)', group: 'Group 3', defaultPrice: '10' },
+  { mode: 'AB', label: 'AB (2 Digits)', group: 'Group 2', defaultPrice: '10' },
+  { mode: 'BC', label: 'BC (2 Digits)', group: 'Group 2', defaultPrice: '10' },
+  { mode: 'AC', label: 'AC (2 Digits)', group: 'Group 2', defaultPrice: '10' },
+  { mode: 'A', label: 'A (1 Digit)', group: 'Group 1', defaultPrice: '12' },
+  { mode: 'B', label: 'B (1 Digit)', group: 'Group 1', defaultPrice: '12' },
+  { mode: 'C', label: 'C (1 Digit)', group: 'Group 1', defaultPrice: '12' },
+];
+
 export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) => {
   const [users, setUsers] = useState<any[]>([]);
+  const [games, setGames] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // New User Modal State
@@ -30,6 +56,39 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
   const [creating, setCreating] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
+  // Price Setting in New User Modal
+  const [newUserSelectedGame, setNewUserSelectedGame] = useState<string>('ALL'); // 'ALL' or gameId
+  const [newUserPrices, setNewUserPrices] = useState<Record<string, Record<string, string>>>({
+    ALL: {
+      SUPER: '10',
+      BOX: '10',
+      AB: '10',
+      BC: '10',
+      AC: '10',
+      A: '12',
+      B: '12',
+      C: '12',
+    },
+  });
+
+  // Dedicated Edit Prices Modal for Existing User
+  const [priceModalUser, setPriceModalUser] = useState<any | null>(null);
+  const [editPriceGame, setEditPriceGame] = useState<string>('ALL');
+  const [editUserPrices, setEditUserPrices] = useState<Record<string, Record<string, string>>>({
+    ALL: {
+      SUPER: '10',
+      BOX: '10',
+      AB: '10',
+      BC: '10',
+      AC: '10',
+      A: '12',
+      B: '12',
+      C: '12',
+    },
+  });
+  const [savingPrices, setSavingPrices] = useState(false);
+  const [loadingPrices, setLoadingPrices] = useState(false);
+
   // Reset Password Modal State
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [resetPassValue, setResetPassValue] = useState('');
@@ -38,7 +97,15 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
 
   useEffect(() => {
     loadUsers();
+    loadGames();
   }, []);
+
+  const loadGames = async () => {
+    try {
+      const res = await api.getGames();
+      setGames(res.games || []);
+    } catch {}
+  };
 
   const loadUsers = async () => {
     setLoading(true);
@@ -49,6 +116,93 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
       Alert.alert('Error', err.message || 'Failed to load users');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePriceChangeForNewUser = (gameKey: string, mode: string, val: string) => {
+    setNewUserPrices((prev) => ({
+      ...prev,
+      [gameKey]: {
+        ...(prev[gameKey] || prev['ALL'] || {}),
+        [mode]: val,
+      },
+    }));
+  };
+
+  const handlePriceChangeForEditUser = (gameKey: string, mode: string, val: string) => {
+    setEditUserPrices((prev) => ({
+      ...prev,
+      [gameKey]: {
+        ...(prev[gameKey] || prev['ALL'] || {}),
+        [mode]: val,
+      },
+    }));
+  };
+
+  const openPriceEditModal = async (user: any) => {
+    setPriceModalUser(user);
+    setEditPriceGame('ALL');
+    setLoadingPrices(true);
+    try {
+      const res = await api.getUserPrices(user.id);
+      const initialMap: Record<string, Record<string, string>> = {
+        ALL: {
+          SUPER: '10',
+          BOX: '10',
+          AB: '10',
+          BC: '10',
+          AC: '10',
+          A: '12',
+          B: '12',
+          C: '12',
+        },
+      };
+
+      if (res.prices && res.prices.length > 0) {
+        for (const p of res.prices) {
+          const gKey = p.gameId || 'ALL';
+          if (!initialMap[gKey]) {
+            initialMap[gKey] = { ...initialMap['ALL'] };
+          }
+          initialMap[gKey][p.mode] = String(p.price);
+        }
+      }
+
+      setEditUserPrices(initialMap);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to load user prices');
+    } finally {
+      setLoadingPrices(false);
+    }
+  };
+
+  const handleSaveEditPrices = async () => {
+    if (!priceModalUser) return;
+    setSavingPrices(true);
+    try {
+      const priceArray: any[] = [];
+      for (const [gameKey, modeMap] of Object.entries(editUserPrices)) {
+        const gameId = gameKey === 'ALL' ? null : gameKey;
+        for (const [mode, priceStr] of Object.entries(modeMap)) {
+          const numPrice = parseFloat(priceStr);
+          if (!isNaN(numPrice) && numPrice >= 0) {
+            priceArray.push({
+              gameId,
+              mode,
+              price: numPrice,
+              commission: 0,
+            });
+          }
+        }
+      }
+
+      await api.setUserPrices(priceModalUser.id, priceArray);
+      Alert.alert('Success', `Ticket price settings updated for ${priceModalUser.username}`);
+      setPriceModalUser(null);
+    } catch (err: any) {
+      Alert.alert('Save Error', err.message || 'Failed to save prices');
+    } finally {
+      setSavingPrices(false);
     }
   };
 
@@ -63,14 +217,32 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
       return;
     }
 
+    // Assemble ticket prices array from newUserPrices
+    const priceArray: any[] = [];
+    for (const [gameKey, modeMap] of Object.entries(newUserPrices)) {
+      const gameId = gameKey === 'ALL' ? null : gameKey;
+      for (const [mode, priceStr] of Object.entries(modeMap)) {
+        const numPrice = parseFloat(priceStr);
+        if (!isNaN(numPrice) && numPrice >= 0) {
+          priceArray.push({
+            gameId,
+            mode,
+            price: numPrice,
+            commission: 0,
+          });
+        }
+      }
+    }
+
     setCreating(true);
     setAddError(null);
     try {
-      await api.createUser(cleanUser, newPassword);
+      await api.createUser(cleanUser, newPassword, priceArray);
       setShowAddModal(false);
       setNewUsername('');
       setNewPassword('');
       loadUsers();
+      Alert.alert('Agent Created', `Agent ${cleanUser} created with customized ticket prices!`);
     } catch (err: any) {
       setAddError(err.message || 'Could not create user');
     } finally {
@@ -167,7 +339,7 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
                   </TouchableOpacity>
                 </View>
 
-                {/* Sales stats */}
+                {/* Sales stats and actions */}
                 <View style={styles.statsRow}>
                   <View style={styles.statBlock}>
                     <Text style={styles.statLabel}>Tickets Sold</Text>
@@ -179,13 +351,22 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
                       ₹{u.total_sales || 0}
                     </Text>
                   </View>
-                  <TouchableOpacity
-                    style={styles.resetPassBtn}
-                    onPress={() => setSelectedUser(u)}
-                  >
-                    <KeyRound size={14} color="#2563EB" />
-                    <Text style={styles.resetPassText}>Reset Pass</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      style={styles.pricesBtn}
+                      onPress={() => openPriceEditModal(u)}
+                    >
+                      <Coins size={14} color="#059669" />
+                      <Text style={styles.pricesBtnText}>Prices</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.resetPassBtn}
+                      onPress={() => setSelectedUser(u)}
+                    >
+                      <KeyRound size={14} color="#2563EB" />
+                      <Text style={styles.resetPassText}>Pass</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             );
@@ -193,11 +374,15 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
         )}
       </ScrollView>
 
-      {/* Add User Modal */}
+      {/* MODAL 1: Add User Modal with Scrollable Ticket Price Settings */}
       <Modal visible={showAddModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.modalCard, { maxHeight: '90%' }]}>
             <Text style={styles.modalTitle}>Onboard New Agent</Text>
+            <Text style={styles.modalSub}>Give username, password and individual ticket prices</Text>
 
             {addError && (
               <View style={styles.errorBox}>
@@ -205,28 +390,116 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
               </View>
             )}
 
-            <Text style={styles.fieldLabel}>4-Character Username *</Text>
-            <TextInput
-              style={styles.input}
-              value={newUsername}
-              onChangeText={(t) => {
-                setNewUsername(t.toUpperCase());
-                if (addError) setAddError(null);
-              }}
-              placeholder="e.g. 0925 or AG01"
-              maxLength={4}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
+            <ScrollView showsVerticalScrollIndicator={true} style={{ flexGrow: 0, maxHeight: 420 }}>
+              <Text style={styles.fieldLabel}>4-Character Username *</Text>
+              <TextInput
+                style={styles.input}
+                value={newUsername}
+                onChangeText={(t) => {
+                  setNewUsername(t.toUpperCase());
+                  if (addError) setAddError(null);
+                }}
+                placeholder="e.g. 0925 or AG01"
+                maxLength={4}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
 
-            <Text style={styles.fieldLabel}>Initial Password *</Text>
-            <TextInput
-              style={styles.input}
-              value={newPassword}
-              onChangeText={setNewPassword}
-              placeholder="Minimum 6 characters"
-              secureTextEntry
-            />
+              <Text style={styles.fieldLabel}>Initial Password *</Text>
+              <TextInput
+                style={styles.input}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="Minimum 6 characters"
+                secureTextEntry
+              />
+
+              {/* Individual Ticket Price Settings Window */}
+              <View style={styles.priceSectionHeader}>
+                <Coins size={16} color="#059669" />
+                <Text style={styles.priceSectionTitle}>INDIVIDUAL TICKET PRICE SETTINGS</Text>
+              </View>
+              <Text style={styles.priceSectionSubtitle}>
+                Custom rate per ticket category for this agent during calculation.
+              </Text>
+
+              {/* Game selection pills */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gamePillsScroll}>
+                <TouchableOpacity
+                  style={[
+                    styles.gamePill,
+                    newUserSelectedGame === 'ALL' && styles.gamePillActive,
+                  ]}
+                  onPress={() => setNewUserSelectedGame('ALL')}
+                >
+                  <Text
+                    style={[
+                      styles.gamePillText,
+                      newUserSelectedGame === 'ALL' && styles.gamePillTextActive,
+                    ]}
+                  >
+                    All Games (Default)
+                  </Text>
+                </TouchableOpacity>
+                {games.map((g) => (
+                  <TouchableOpacity
+                    key={g.id}
+                    style={[
+                      styles.gamePill,
+                      newUserSelectedGame === g.id && styles.gamePillActive,
+                    ]}
+                    onPress={() => setNewUserSelectedGame(g.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.gamePillText,
+                        newUserSelectedGame === g.id && styles.gamePillTextActive,
+                      ]}
+                    >
+                      {g.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Scrollable Category Price Table */}
+              <View style={styles.priceTableContainer}>
+                <View style={styles.priceTableHeader}>
+                  <Text style={[styles.priceTableHeaderCol, { flex: 1.8 }]}>Category</Text>
+                  <Text style={[styles.priceTableHeaderCol, { flex: 1 }]}>Group</Text>
+                  <Text style={[styles.priceTableHeaderCol, { flex: 1.2, textAlign: 'right' }]}>Rate (₹)</Text>
+                </View>
+
+                {DEFAULT_CATEGORIES.map((cat) => {
+                  const currentVal =
+                    newUserPrices[newUserSelectedGame]?.[cat.mode] ??
+                    newUserPrices['ALL']?.[cat.mode] ??
+                    cat.defaultPrice;
+
+                  return (
+                    <View key={cat.mode} style={styles.priceTableRow}>
+                      <View style={{ flex: 1.8 }}>
+                        <Text style={styles.priceRowMode}>{cat.mode}</Text>
+                        <Text style={styles.priceRowSub}>{cat.label}</Text>
+                      </View>
+                      <Text style={[styles.priceRowGroup, { flex: 1 }]}>{cat.group}</Text>
+                      <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+                        <TextInput
+                          style={styles.priceInputSmall}
+                          keyboardType="numeric"
+                          value={currentVal}
+                          onChangeText={(val) =>
+                            handlePriceChangeForNewUser(newUserSelectedGame, cat.mode, val)
+                          }
+                          placeholder={cat.defaultPrice}
+                          placeholderTextColor="#94A3B8"
+                        />
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
 
             <View style={styles.modalBtnRow}>
               <TouchableOpacity
@@ -243,15 +516,138 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
                 {creating ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={styles.modalSubmitText}>Create Agent</Text>
+                  <Text style={styles.modalSubmitText}>Create Agent & Save Prices</Text>
                 )}
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
-      {/* Reset Password Modal */}
+      {/* MODAL 2: Dedicated Scrollable Price Settings Window for Existing Agent */}
+      <Modal visible={!!priceModalUser} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={[styles.modalCard, { maxHeight: '88%' }]}>
+            <View style={styles.modalCardHeaderRow}>
+              <View>
+                <Text style={styles.modalTitle}>Ticket Price Settings</Text>
+                <Text style={styles.modalSub}>
+                  Agent: {priceModalUser?.username} • Customizable per game & category
+                </Text>
+              </View>
+              <Coins size={22} color="#059669" />
+            </View>
+
+            {loadingPrices ? (
+              <ActivityIndicator color={colors.emerald} style={{ marginVertical: 30 }} />
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={true} style={{ flexGrow: 0, maxHeight: 380 }}>
+                {/* Game Pills */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gamePillsScroll}>
+                  <TouchableOpacity
+                    style={[
+                      styles.gamePill,
+                      editPriceGame === 'ALL' && styles.gamePillActive,
+                    ]}
+                    onPress={() => setEditPriceGame('ALL')}
+                  >
+                    <Text
+                      style={[
+                        styles.gamePillText,
+                        editPriceGame === 'ALL' && styles.gamePillTextActive,
+                      ]}
+                    >
+                      All Games (Default)
+                    </Text>
+                  </TouchableOpacity>
+                  {games.map((g) => (
+                    <TouchableOpacity
+                      key={g.id}
+                      style={[
+                        styles.gamePill,
+                        editPriceGame === g.id && styles.gamePillActive,
+                      ]}
+                      onPress={() => setEditPriceGame(g.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.gamePillText,
+                          editPriceGame === g.id && styles.gamePillTextActive,
+                        ]}
+                      >
+                        {g.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {/* Scrollable table of categories */}
+                <View style={styles.priceTableContainer}>
+                  <View style={styles.priceTableHeader}>
+                    <Text style={[styles.priceTableHeaderCol, { flex: 1.8 }]}>Category</Text>
+                    <Text style={[styles.priceTableHeaderCol, { flex: 1 }]}>Group</Text>
+                    <Text style={[styles.priceTableHeaderCol, { flex: 1.2, textAlign: 'right' }]}>Rate (₹)</Text>
+                  </View>
+
+                  {DEFAULT_CATEGORIES.map((cat) => {
+                    const currentVal =
+                      editUserPrices[editPriceGame]?.[cat.mode] ??
+                      editUserPrices['ALL']?.[cat.mode] ??
+                      cat.defaultPrice;
+
+                    return (
+                      <View key={cat.mode} style={styles.priceTableRow}>
+                        <View style={{ flex: 1.8 }}>
+                          <Text style={styles.priceRowMode}>{cat.mode}</Text>
+                          <Text style={styles.priceRowSub}>{cat.label}</Text>
+                        </View>
+                        <Text style={[styles.priceRowGroup, { flex: 1 }]}>{cat.group}</Text>
+                        <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+                          <TextInput
+                            style={styles.priceInputSmall}
+                            keyboardType="numeric"
+                            value={currentVal}
+                            onChangeText={(val) =>
+                              handlePriceChangeForEditUser(editPriceGame, cat.mode, val)
+                            }
+                            placeholder={cat.defaultPrice}
+                            placeholderTextColor="#94A3B8"
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setPriceModalUser(null)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, savingPrices && { opacity: 0.7 }]}
+                disabled={savingPrices}
+                onPress={handleSaveEditPrices}
+              >
+                {savingPrices ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.modalSubmitText}>Save Prices</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* MODAL 3: Reset Password Modal */}
       <Modal visible={!!selectedUser} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -525,5 +921,129 @@ const styles = StyleSheet.create({
     color: '#DC2626',
     fontSize: 13,
     fontWeight: '600',
+  },
+  pricesBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  pricesBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  modalCardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  priceSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 16,
+    marginBottom: 2,
+  },
+  priceSectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#059669',
+    letterSpacing: 0.5,
+  },
+  priceSectionSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginBottom: 8,
+  },
+  gamePillsScroll: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  gamePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  gamePillActive: {
+    backgroundColor: colors.emerald,
+    borderColor: colors.emerald,
+  },
+  gamePillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  gamePillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  priceTableContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  priceTableHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#EDF2F7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#CBD5E1',
+  },
+  priceTableHeaderCol: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  priceTableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    backgroundColor: '#FFFFFF',
+  },
+  priceRowMode: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  priceRowSub: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  priceRowGroup: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  priceInputSmall: {
+    width: 60,
+    height: 32,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 6,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    paddingVertical: 2,
+    paddingHorizontal: 4,
   },
 });

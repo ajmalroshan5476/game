@@ -100,6 +100,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
   // Queued Entries
   const [entries, setEntries] = useState<QueuedEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [userPrices, setUserPrices] = useState<any[]>([]);
 
   // Limit Exceeded Alert
   const [limitAlert, setLimitAlert] = useState<{
@@ -124,10 +125,32 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
     return () => clearInterval(timer);
   }, []);
 
-  // Load games from API
+  // Load games and individual user ticket pricing
   useEffect(() => {
     loadGames();
+    loadUserPricing();
   }, []);
+
+  const loadUserPricing = async () => {
+    try {
+      const res = await api.getMyPrices();
+      setUserPrices(res.prices || []);
+    } catch {}
+  };
+
+  const getModeUnitPrice = (mode: string) => {
+    if (selectedGame?.id) {
+      const specific = userPrices.find((p) => p.gameId === selectedGame.id && p.mode === mode);
+      if (specific && !isNaN(Number(specific.price))) {
+        return Number(specific.price);
+      }
+    }
+    const globalRate = userPrices.find((p) => !p.gameId && p.mode === mode);
+    if (globalRate && !isNaN(Number(globalRate.price))) {
+      return Number(globalRate.price);
+    }
+    return ['A', 'B', 'C'].includes(mode) ? 12 : 10;
+  };
 
   const loadGames = async () => {
     try {
@@ -244,11 +267,13 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
 
     if (targetNumbers.length === 0) return;
 
-    // 2. Generate entries based on actionType and digitGroup
     const newItems: QueuedEntry[] = [];
-    const unitPrice = digitGroup === '1' ? 12 : 10; // ₹12 for Group 1 (A,B,C), ₹10 for Groups 2 & 3
 
+    // 2. Generate entries based on actionType and digitGroup
     if (digitGroup === '3') {
+      const superPrice = getModeUnitPrice('SUPER');
+      const boxPrice = getModeUnitPrice('BOX');
+
       if (actionType === 'SUPER') {
         for (const num of targetNumbers) {
           newItems.push({
@@ -257,8 +282,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             quantity: defaultQty,
             mode: 'SUPER',
             isBox: false,
-            unitPrice,
-            totalPrice: defaultQty * unitPrice,
+            unitPrice: superPrice,
+            totalPrice: defaultQty * superPrice,
           });
         }
       } else if (actionType === 'BOX') {
@@ -270,8 +295,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             quantity: bQty,
             mode: 'BOX',
             isBox: true,
-            unitPrice,
-            totalPrice: bQty * unitPrice,
+            unitPrice: boxPrice,
+            totalPrice: bQty * boxPrice,
           });
         }
       } else if (actionType === 'ALL') {
@@ -284,8 +309,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             quantity: defaultQty,
             mode: 'SUPER',
             isBox: false,
-            unitPrice,
-            totalPrice: defaultQty * unitPrice,
+            unitPrice: superPrice,
+            totalPrice: defaultQty * superPrice,
           });
           // Always add BOX
           newItems.push({
@@ -294,8 +319,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             quantity: bQty,
             mode: 'BOX',
             isBox: true,
-            unitPrice,
-            totalPrice: bQty * unitPrice,
+            unitPrice: boxPrice,
+            totalPrice: bQty * boxPrice,
           });
         }
       }
@@ -304,6 +329,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
         actionType === 'ALL' ? ['AB', 'BC', 'AC'] : [actionType as TicketMode];
 
       for (const m of modesToApply) {
+        const modePrice = getModeUnitPrice(m);
         for (const num of targetNumbers) {
           newItems.push({
             id: Math.random().toString(36).substring(2, 9),
@@ -311,8 +337,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             quantity: defaultQty,
             mode: m,
             isBox: false,
-            unitPrice,
-            totalPrice: defaultQty * unitPrice,
+            unitPrice: modePrice,
+            totalPrice: defaultQty * modePrice,
           });
         }
       }
@@ -321,6 +347,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
         actionType === 'ALL' ? ['A', 'B', 'C'] : [actionType as TicketMode];
 
       for (const m of modesToApply) {
+        const modePrice = getModeUnitPrice(m);
         for (const num of targetNumbers) {
           newItems.push({
             id: Math.random().toString(36).substring(2, 9),
@@ -328,8 +355,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             quantity: defaultQty,
             mode: m,
             isBox: false,
-            unitPrice,
-            totalPrice: defaultQty * unitPrice,
+            unitPrice: modePrice,
+            totalPrice: defaultQty * modePrice,
           });
         }
       }

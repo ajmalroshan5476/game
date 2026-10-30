@@ -176,10 +176,10 @@ export const api = {
 
   // Admin Users
   getUsers: () => request<{ users: any[] }>('/api/admin/users'),
-  createUser: (username: string, initialPassword: string) =>
+  createUser: (username: string, initialPassword: string, ticketPrices?: any[]) =>
     request<any>('/api/admin/users', {
       method: 'POST',
-      body: JSON.stringify({ username, initialPassword }),
+      body: JSON.stringify({ username, initialPassword, ticketPrices }),
     }),
   updateUserStatus: (userId: string, status: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE') =>
     request<any>(`/api/admin/users/${userId}/status`, {
@@ -190,5 +190,42 @@ export const api = {
     request<any>(`/api/admin/users/${userId}/reset-password`, {
       method: 'POST',
       body: JSON.stringify({ newPassword }),
+    }),
+
+  // User Custom Ticket Pricing
+  getUserPrices: (userId: string) => request<{ prices: any[] }>(`/api/admin/users/${userId}/prices`),
+  setUserPrices: (userId: string, prices: any[]) =>
+    request<any>(`/api/admin/users/${userId}/prices`, {
+      method: 'POST',
+      body: JSON.stringify({ prices }),
+    }),
+  getMyPrices: () => request<{ prices: any[] }>('/api/users/me/prices'),
+
+  // Universal Game Range Limits
+  getGameLimits: (gameId?: string) => {
+    const qs = gameId ? `?gameId=${encodeURIComponent(gameId)}` : '';
+    return request<{ limits: any[] }>(`/api/admin/game-limits${qs}`);
+  },
+  setGameLimit: (payload: {
+    gameId: string;
+    digitType: number;
+    startRange: string;
+    endRange: string;
+    maxCap: number;
+  }) =>
+    request<any>('/api/admin/game-limits', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  deleteGameLimit: (id: string) =>
+    request<any>(`/api/admin/game-limits/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Edit / Update Result
+  updateResult: (drawId: string, payload: any) =>
+    request<any>(`/api/admin/results/${drawId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     }),
 };
