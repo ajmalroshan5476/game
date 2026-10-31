@@ -136,8 +136,7 @@ export class ResultService {
       }> = [];
 
       for (const entry of entriesRes.rows) {
-        let winningPos: string | null = null;
-        let rule: { prizeAmount: number; superCommission: number } | null = null;
+        const matchedPrizes: Array<{ pos: string; rule: { prizeAmount: number; superCommission: number } }> = [];
 
         // 1. Evaluate 3-digit matches
         if (entry.number.length === 3) {
@@ -146,67 +145,61 @@ export class ResultService {
             // No other number (2nd, 3rd, 4th, 5th, 6th) is eligible for BOX.
             if (entry.number === clean1st) {
               // Exact 1st Prize match: Position 1
-              winningPos = 'BOX_FIRST';
-              rule = getRule('BOX', 'FIRST', 3000.0, 300.0);
+              matchedPrizes.push({ pos: 'BOX_FIRST', rule: getRule('BOX', 'FIRST', 3000.0, 300.0) });
             } else if (isBoxMatch(entry.number, clean1st)) {
               // Permutation of 1st Prize
-              winningPos = 'BOX_OTHER';
-              rule = getRule('BOX', 'SECOND', 800.0, 30.0);
+              matchedPrizes.push({ pos: 'BOX_OTHER', rule: getRule('BOX', 'SECOND', 800.0, 30.0) });
             }
           } else {
-            // SUPER Mode Evaluation
+            // SUPER Mode Evaluation: Numbers may appear twice anywhere!
             if (entry.number === clean1st) {
-              winningPos = 'FIRST';
-              rule = getRule('SUPER', 'FIRST', 5000.0, 400.0);
-            } else if (clean2nd && entry.number === clean2nd) {
-              winningPos = 'SECOND';
-              rule = getRule('SUPER', 'SECOND', 500.0, 50.0);
-            } else if (clean3rd && entry.number === clean3rd) {
-              winningPos = 'THIRD';
-              rule = getRule('SUPER', 'THIRD', 250.0, 20.0);
-            } else if (clean4th && entry.number === clean4th) {
-              winningPos = 'FOURTH';
-              rule = getRule('SUPER', 'FOURTH', 100.0, 20.0);
-            } else if (clean5th && entry.number === clean5th) {
-              winningPos = 'FIFTH';
-              rule = getRule('SUPER', 'FIFTH', 50.0, 20.0);
-            } else if (clean6th.includes(entry.number)) {
-              winningPos = 'SIXTH';
-              rule = getRule('SUPER', 'SIXTH', 20.0, 10.0);
+              matchedPrizes.push({ pos: 'FIRST', rule: getRule('SUPER', 'FIRST', 5000.0, 400.0) });
+            }
+            if (clean2nd && entry.number === clean2nd) {
+              matchedPrizes.push({ pos: 'SECOND', rule: getRule('SUPER', 'SECOND', 500.0, 50.0) });
+            }
+            if (clean3rd && entry.number === clean3rd) {
+              matchedPrizes.push({ pos: 'THIRD', rule: getRule('SUPER', 'THIRD', 250.0, 20.0) });
+            }
+            if (clean4th && entry.number === clean4th) {
+              matchedPrizes.push({ pos: 'FOURTH', rule: getRule('SUPER', 'FOURTH', 100.0, 20.0) });
+            }
+            if (clean5th && entry.number === clean5th) {
+              matchedPrizes.push({ pos: 'FIFTH', rule: getRule('SUPER', 'FIFTH', 50.0, 20.0) });
+            }
+            // For 6th prizes: if a number repeats in 6th prizes, match every occurrence!
+            for (const sNum of clean6th) {
+              if (entry.number === sNum) {
+                matchedPrizes.push({ pos: 'SIXTH', rule: getRule('SUPER', 'SIXTH', 20.0, 10.0) });
+              }
             }
           }
         }
         // 2. Evaluate 2-digit matches (AB, BC, AC)
         else if (entry.number.length === 2 && clean1st.length >= 3) {
           if (entry.mode === 'AB' && entry.number === clean1st.substring(0, 2)) {
-            winningPos = 'FIRST_AB';
-            rule = getRule('AB', 'FIRST', 700.0, 30.0);
+            matchedPrizes.push({ pos: 'FIRST_AB', rule: getRule('AB', 'FIRST', 700.0, 30.0) });
           } else if (entry.mode === 'BC' && entry.number === clean1st.substring(1, 3)) {
-            winningPos = 'FIRST_BC';
-            rule = getRule('BC', 'FIRST', 700.0, 30.0);
+            matchedPrizes.push({ pos: 'FIRST_BC', rule: getRule('BC', 'FIRST', 700.0, 30.0) });
           } else if (entry.mode === 'AC' && entry.number === clean1st[0] + clean1st[2]) {
-            winningPos = 'FIRST_AC';
-            rule = getRule('AC', 'FIRST', 700.0, 30.0);
+            matchedPrizes.push({ pos: 'FIRST_AC', rule: getRule('AC', 'FIRST', 700.0, 30.0) });
           }
         }
         // 3. Evaluate 1-digit matches (A, B, C)
         else if (entry.number.length === 1 && clean1st.length >= 3) {
           if (entry.mode === 'A' && entry.number === clean1st[0]) {
-            winningPos = 'FIRST_A';
-            rule = getRule('A', 'FIRST', 100.0, 0.0);
+            matchedPrizes.push({ pos: 'FIRST_A', rule: getRule('A', 'FIRST', 100.0, 0.0) });
           } else if (entry.mode === 'B' && entry.number === clean1st[1]) {
-            winningPos = 'FIRST_B';
-            rule = getRule('B', 'FIRST', 100.0, 0.0);
+            matchedPrizes.push({ pos: 'FIRST_B', rule: getRule('B', 'FIRST', 100.0, 0.0) });
           } else if (entry.mode === 'C' && entry.number === clean1st[2]) {
-            winningPos = 'FIRST_C';
-            rule = getRule('C', 'FIRST', 100.0, 0.0);
+            matchedPrizes.push({ pos: 'FIRST_C', rule: getRule('C', 'FIRST', 100.0, 0.0) });
           }
         }
 
-        if (winningPos && rule) {
+        for (const match of matchedPrizes) {
           const qty = parseInt(entry.quantity, 10);
-          const prizeTotal = rule.prizeAmount * qty;
-          const commissionTotal = rule.superCommission * qty;
+          const prizeTotal = match.rule.prizeAmount * qty;
+          const commissionTotal = match.rule.superCommission * qty;
 
           totalWinners++;
           totalPrizePayout += prizeTotal;
@@ -220,7 +213,7 @@ export class ResultService {
             number: entry.number,
             quantity: qty,
             mode: entry.mode,
-            prizePosition: winningPos,
+            prizePosition: match.pos,
             prizeAmount: prizeTotal,
             commissionAmount: commissionTotal,
           });
@@ -237,7 +230,7 @@ export class ResultService {
               entry.entry_id,
               entry.user_id,
               orgId,
-              winningPos,
+              match.pos,
               prizeTotal,
               commissionTotal,
             ]
@@ -258,9 +251,9 @@ export class ResultService {
               entry.ticket_id,
               prizeTotal,
               entry.ticket_number,
-              `Prize: ${winningPos} for number ${entry.number}`,
+              `Prize: ${match.pos} for number ${entry.number}`,
               commissionTotal,
-              `Super Commission: ${winningPos} for number ${entry.number}`,
+              `Super Commission: ${match.pos} for number ${entry.number}`,
             ]
           );
         }
