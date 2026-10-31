@@ -305,8 +305,10 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
     const newItems: string[] = [];
     for (const p of parts) {
-      const padded = p.padStart(3, '0').slice(-3);
-      newItems.push(padded);
+      if (/^\d{1,3}$/.test(p)) {
+        const padded = p.padStart(3, '0').slice(-3);
+        newItems.push(padded);
+      }
     }
     if (newItems.length > 0) {
       setSixthList((prev) => [...prev, ...newItems]);
@@ -470,8 +472,10 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     if (raw) {
       const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
       for (const p of parts) {
-        const padded = p.padStart(3, '0').slice(-3);
-        currentSixth.push(padded);
+        if (/^\d{1,3}$/.test(p)) {
+          const padded = p.padStart(3, '0').slice(-3);
+          currentSixth.push(padded);
+        }
       }
       setSixthList(currentSixth);
       setSingleSixthInput('');
@@ -540,8 +544,10 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     if (raw) {
       const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
       for (const p of parts) {
-        const padded = p.padStart(3, '0').slice(-3);
-        currentSixth.push(padded);
+        if (/^\d{1,3}$/.test(p)) {
+          const padded = p.padStart(3, '0').slice(-3);
+          currentSixth.push(padded);
+        }
       }
       setSixthList(currentSixth);
       setSingleSixthInput('');
