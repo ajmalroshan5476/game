@@ -35,6 +35,7 @@ import {
   Edit3,
   Trash2,
   RotateCcw,
+  Sparkles,
 } from 'lucide-react-native';
 
 interface ResultsScreenProps {
@@ -70,7 +71,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
   // Admin Publish & Edit Result Modal State
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [isEditingResult, setIsEditingResult] = useState(false);
-  const [publishStep, setPublishStep] = useState<'prizes1to5' | 'sixthPrizes'>('prizes1to5');
+  const [publishTab, setPublishTab] = useState<'firstPrize' | 'prizes2to5' | 'sixthPrizes' | 'summary'>('firstPrize');
   const [publishDrawId, setPublishDrawId] = useState('');
   const [firstPrize, setFirstPrize] = useState('');
   const [secondPrize, setSecondPrize] = useState('');
@@ -218,18 +219,56 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     }
   };
 
-  const openNewPublishModal = () => {
-    setIsEditingResult(false);
-    setPublishStep('prizes1to5');
-    setFirstPrize('');
-    setSecondPrize('');
-    setThirdPrize('');
-    setFourthPrize('');
-    setFifthPrize('');
-    setSixthList([]);
+  const loadDrawDetailsForModal = async (drawId: string) => {
+    setPublishDrawId(drawId);
+    try {
+      const data = await api.checkResult(drawId);
+      if (data && data.result) {
+        setIsEditingResult(true);
+        setFirstPrize(data.result.firstPrize || '');
+        setSecondPrize(data.result.secondPrize || '');
+        setThirdPrize(data.result.thirdPrize || '');
+        setFourthPrize(data.result.fourthPrize || '');
+        setFifthPrize(data.result.fifthPrize || '');
+        let sixth: string[] = [];
+        if (Array.isArray(data.result.sixthPrizes)) {
+          sixth = data.result.sixthPrizes;
+        } else if (typeof data.result.sixthPrizes === 'string') {
+          try {
+            sixth = JSON.parse(data.result.sixthPrizes);
+          } catch {
+            sixth = data.result.sixthPrizes.split(/[,\s]+/).filter(Boolean);
+          }
+        }
+        setSixthList(sixth);
+      } else {
+        setIsEditingResult(false);
+        setFirstPrize('');
+        setSecondPrize('');
+        setThirdPrize('');
+        setFourthPrize('');
+        setFifthPrize('');
+        setSixthList([]);
+      }
+    } catch {
+      setIsEditingResult(false);
+    }
+  };
+
+  const openNewPublishModal = (targetDrawId?: string) => {
+    const drawToSelect = targetDrawId || publishDrawId || (drawsList.length > 0 ? drawsList[0].id : '');
+    setPublishTab('firstPrize');
     setSingleSixthInput('');
-    if (drawsList.length > 0) {
-      setPublishDrawId(drawsList[0].id);
+    if (drawToSelect) {
+      loadDrawDetailsForModal(drawToSelect);
+    } else {
+      setIsEditingResult(false);
+      setFirstPrize('');
+      setSecondPrize('');
+      setThirdPrize('');
+      setFourthPrize('');
+      setFifthPrize('');
+      setSixthList([]);
     }
     setShowPublishModal(true);
   };
@@ -237,7 +276,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
   const openEditResultModal = () => {
     if (!currentResult) return;
     setIsEditingResult(true);
-    setPublishStep('prizes1to5');
+    setPublishTab('firstPrize');
     setPublishDrawId(currentResult.draw_id);
     setFirstPrize(currentResult.first_prize || '');
     setSecondPrize(currentResult.second_prize || '');
@@ -281,18 +320,23 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     setSixthList((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Admin Publish & Update Result Handler
-  const handlePublish = async () => {
-    if (!publishDrawId || !firstPrize.trim()) {
-      Alert.alert('Required Fields', 'Draw and 1st Prize are required');
+  // Dedicated Handler: Publish / Update 1st Prize Only
+  const handlePublishFirstPrizeOnly = async () => {
+    if (!publishDrawId) {
+      Alert.alert('Selection Error', 'Please select a draw first');
+      return;
+    }
+    const clean1st = firstPrize.trim();
+    if (!clean1st || clean1st.length !== 3 || !/^\d{3}$/.test(clean1st)) {
+      Alert.alert('Invalid 1st Prize', 'Please enter a valid 3-digit number for 1st Prize (e.g. 737)');
       return;
     }
 
     setPublishing(true);
     try {
-      const payload = {
+      const payload: any = {
         drawId: publishDrawId,
-        firstPrize: firstPrize.trim(),
+        firstPrize: clean1st,
         secondPrize: secondPrize.trim() || undefined,
         thirdPrize: thirdPrize.trim() || undefined,
         fourthPrize: fourthPrize.trim() || undefined,
@@ -307,22 +351,235 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
         res = await api.publishResult(payload);
       }
 
+      setIsEditingResult(true);
+      Alert.alert(
+        '1st Prize Saved!',
+        `1st Prize (${clean1st}) saved successfully!\n\n` +
+        `Winners Generated: ${res.totalWinners ?? res.summary?.totalWinners ?? 0}\n` +
+        `Total Prize Payout: ₹${res.totalPrizePayout ?? res.summary?.totalPrize ?? 0}\n` +
+        `Super Commission: ₹${res.totalCommissionPayout ?? res.summary?.totalCommission ?? 0}\n\n` +
+        `You can now publish 2nd, 3rd, 4th, 5th, and 6th prizes when ready.`
+      );
+
+      // Immediately refresh results
+      if (selectedGame) {
+        await fetchResultsForGame(selectedGame.id, dateInput);
+      }
+      setCheckingDrawId(publishDrawId);
+      await loadResultChecking(publishDrawId);
+    } catch (err: any) {
+      Alert.alert('Save Error', err.message || 'Failed to publish 1st prize');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  // Dedicated Handler: Publish / Update 2nd, 3rd, 4th, 5th Prizes
+  const handlePublishPrizes2to5 = async () => {
+    if (!publishDrawId) {
+      Alert.alert('Selection Error', 'Please select a draw first');
+      return;
+    }
+    const clean1st = firstPrize.trim();
+    if (!clean1st) {
+      Alert.alert('1st Prize Required', 'Please enter and publish 1st Prize before publishing 2nd to 5th prizes.');
+      setPublishTab('firstPrize');
+      return;
+    }
+
+    const c2 = secondPrize.trim();
+    const c3 = thirdPrize.trim();
+    const c4 = fourthPrize.trim();
+    const c5 = fifthPrize.trim();
+
+    if (!c2 && !c3 && !c4 && !c5) {
+      Alert.alert('No Prizes Entered', 'Please enter at least one number for 2nd, 3rd, 4th, or 5th prize.');
+      return;
+    }
+
+    if (c2 && (c2.length !== 3 || !/^\d{3}$/.test(c2))) {
+      Alert.alert('Invalid 2nd Prize', '2nd Prize must be a 3-digit number (e.g. 015)');
+      return;
+    }
+    if (c3 && (c3.length !== 3 || !/^\d{3}$/.test(c3))) {
+      Alert.alert('Invalid 3rd Prize', '3rd Prize must be a 3-digit number (e.g. 221)');
+      return;
+    }
+    if (c4 && (c4.length !== 3 || !/^\d{3}$/.test(c4))) {
+      Alert.alert('Invalid 4th Prize', '4th Prize must be a 3-digit number (e.g. 095)');
+      return;
+    }
+    if (c5 && (c5.length !== 3 || !/^\d{3}$/.test(c5))) {
+      Alert.alert('Invalid 5th Prize', '5th Prize must be a 3-digit number (e.g. 342)');
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const payload: any = {
+        drawId: publishDrawId,
+        firstPrize: clean1st,
+        secondPrize: c2 || undefined,
+        thirdPrize: c3 || undefined,
+        fourthPrize: c4 || undefined,
+        fifthPrize: c5 || undefined,
+        sixthPrizes: sixthList.length > 0 ? sixthList : undefined,
+      };
+
+      let res;
+      if (isEditingResult) {
+        res = await api.updateResult(publishDrawId, payload);
+      } else {
+        res = await api.publishResult(payload);
+      }
+
+      setIsEditingResult(true);
+      Alert.alert(
+        '2nd - 5th Prizes Saved!',
+        `Prizes updated successfully!\n\n` +
+        `Total Winners: ${res.totalWinners ?? res.summary?.totalWinners ?? 0}\n` +
+        `Total Prize Payout: ₹${res.totalPrizePayout ?? res.summary?.totalPrize ?? 0}`
+      );
+
+      if (selectedGame) {
+        await fetchResultsForGame(selectedGame.id, dateInput);
+      }
+      setCheckingDrawId(publishDrawId);
+      await loadResultChecking(publishDrawId);
+    } catch (err: any) {
+      Alert.alert('Save Error', err.message || 'Failed to save 2nd to 5th prizes');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  // Dedicated Handler: Publish / Update 6th Prizes (Consolations)
+  const handlePublishSixthPrizes = async () => {
+    if (!publishDrawId) {
+      Alert.alert('Selection Error', 'Please select a draw first');
+      return;
+    }
+    const clean1st = firstPrize.trim();
+    if (!clean1st) {
+      Alert.alert('1st Prize Required', 'Please enter and publish 1st Prize before publishing 6th prizes.');
+      setPublishTab('firstPrize');
+      return;
+    }
+
+    // Auto append if something is in singleSixthInput
+    let currentSixth = [...sixthList];
+    const raw = singleSixthInput.trim();
+    if (raw) {
+      const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
+      for (const p of parts) {
+        const padded = p.padStart(3, '0').slice(-3);
+        if (!currentSixth.includes(padded)) {
+          currentSixth.push(padded);
+        }
+      }
+      setSixthList(currentSixth);
+      setSingleSixthInput('');
+    }
+
+    if (currentSixth.length === 0) {
+      Alert.alert('No 6th Prizes', 'Please add 6th prize numbers before publishing.');
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const payload: any = {
+        drawId: publishDrawId,
+        firstPrize: clean1st,
+        secondPrize: secondPrize.trim() || undefined,
+        thirdPrize: thirdPrize.trim() || undefined,
+        fourthPrize: fourthPrize.trim() || undefined,
+        fifthPrize: fifthPrize.trim() || undefined,
+        sixthPrizes: currentSixth,
+      };
+
+      let res;
+      if (isEditingResult) {
+        res = await api.updateResult(publishDrawId, payload);
+      } else {
+        res = await api.publishResult(payload);
+      }
+
+      setIsEditingResult(true);
+      Alert.alert(
+        '6th Prizes Saved!',
+        `${currentSixth.length} consolation numbers published successfully!\n\n` +
+        `Total Winners: ${res.totalWinners ?? res.summary?.totalWinners ?? 0}\n` +
+        `Total Prize Payout: ₹${res.totalPrizePayout ?? res.summary?.totalPrize ?? 0}`
+      );
+
+      if (selectedGame) {
+        await fetchResultsForGame(selectedGame.id, dateInput);
+      }
+      setCheckingDrawId(publishDrawId);
+      await loadResultChecking(publishDrawId);
+    } catch (err: any) {
+      Alert.alert('Save Error', err.message || 'Failed to save 6th prizes');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  // Master Handler: Save & Publish All Configured Prizes and close modal
+  const handlePublishAll = async () => {
+    if (!publishDrawId) {
+      Alert.alert('Selection Error', 'Please select a draw first');
+      return;
+    }
+    const clean1st = firstPrize.trim();
+    if (!clean1st || clean1st.length !== 3 || !/^\d{3}$/.test(clean1st)) {
+      Alert.alert('1st Prize Required', '1st Prize (3 digits) is required to publish results.');
+      setPublishTab('firstPrize');
+      return;
+    }
+
+    // Auto append if something is in singleSixthInput
+    let currentSixth = [...sixthList];
+    const raw = singleSixthInput.trim();
+    if (raw) {
+      const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
+      for (const p of parts) {
+        const padded = p.padStart(3, '0').slice(-3);
+        if (!currentSixth.includes(padded)) {
+          currentSixth.push(padded);
+        }
+      }
+      setSixthList(currentSixth);
+      setSingleSixthInput('');
+    }
+
+    setPublishing(true);
+    try {
+      const payload: any = {
+        drawId: publishDrawId,
+        firstPrize: clean1st,
+        secondPrize: secondPrize.trim() || undefined,
+        thirdPrize: thirdPrize.trim() || undefined,
+        fourthPrize: fourthPrize.trim() || undefined,
+        fifthPrize: fifthPrize.trim() || undefined,
+        sixthPrizes: currentSixth.length > 0 ? currentSixth : undefined,
+      };
+
+      let res;
+      if (isEditingResult) {
+        res = await api.updateResult(publishDrawId, payload);
+      } else {
+        res = await api.publishResult(payload);
+      }
+
       Alert.alert(
         isEditingResult ? 'Results Updated Successfully!' : 'Result Published Successfully!',
-        `Winners Generated: ${res.totalWinners ?? res.summary?.totalWinners ?? 0}\nTotal Prize Payout: ₹${res.totalPrizePayout ?? res.summary?.totalPrize ?? 0}\nTotal Commission: ₹${res.totalCommissionPayout ?? res.summary?.totalCommission ?? 0}`
+        `Total Winners: ${res.totalWinners ?? res.summary?.totalWinners ?? 0}\nTotal Prize Payout: ₹${res.totalPrizePayout ?? res.summary?.totalPrize ?? 0}\nTotal Commission: ₹${res.totalCommissionPayout ?? res.summary?.totalCommission ?? 0}`
       );
 
       const targetDrawId = publishDrawId;
       setShowPublishModal(false);
-      setFirstPrize('');
-      setSecondPrize('');
-      setThirdPrize('');
-      setFourthPrize('');
-      setFifthPrize('');
-      setSixthList([]);
-      setSingleSixthInput('');
 
-      // Immediately re-fetch and reflect in results board & checking tab
       if (selectedGame) {
         await fetchResultsForGame(selectedGame.id, dateInput);
       }
@@ -392,7 +649,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
               )}
               <TouchableOpacity
                 style={styles.adminPublishBtn}
-                onPress={openNewPublishModal}
+                onPress={() => openNewPublishModal()}
               >
                 <Plus size={16} color="#FFFFFF" strokeWidth={2.5} />
                 <Text style={styles.adminPublishBtnText}>Publish</Text>
@@ -634,8 +891,19 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                       <Text style={styles.checkGameTitle}>
                         {checkingData.draw.gameName} ({checkingData.draw.drawTime})
                       </Text>
-                      <View style={styles.resultedBadge}>
-                        <Text style={styles.resultedBadgeText}>RESULT PUBLISHED</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={styles.resultedBadge}>
+                          <Text style={styles.resultedBadgeText}>RESULT PUBLISHED</Text>
+                        </View>
+                        {user?.role === 'ADMIN' && (
+                          <TouchableOpacity
+                            style={styles.editResultSmallBtn}
+                            onPress={() => openNewPublishModal(checkingData.draw.id)}
+                          >
+                            <Edit3 size={13} color="#007BFF" />
+                            <Text style={styles.editResultSmallBtnText}>Edit</Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </View>
                     <View style={styles.prizesQuickRow}>
@@ -666,10 +934,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                     {user?.role === 'ADMIN' && (
                       <TouchableOpacity
                         style={styles.enterResultSmallBtn}
-                        onPress={() => {
-                          setPublishDrawId(checkingData.draw.id);
-                          setShowPublishModal(true);
-                        }}
+                        onPress={() => openNewPublishModal(checkingData.draw.id)}
                       >
                         <Text style={styles.enterResultSmallBtnText}>Enter</Text>
                       </TouchableOpacity>
@@ -840,17 +1105,15 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
         >
-          <View style={[styles.publishModalCard, { maxHeight: '90%' }]}>
+          <View style={[styles.publishModalCard, { maxHeight: '92%' }]}>
             {/* Header */}
             <View style={styles.publishModalHeader}>
-              <View>
+              <View style={{ flex: 1, marginRight: 8 }}>
                 <Text style={styles.publishModalTitle}>
                   {isEditingResult ? 'Edit Winning Results' : 'Publish Official Results'}
                 </Text>
                 <Text style={styles.publishModalSub}>
-                  {isEditingResult
-                    ? 'Clear mistake & replace with correct number. Updates immediately.'
-                    : '1st to 5th prize enterable first, all 6th prizes later.'}
+                  Publish 1st prize separately anytime. All prizes (1st to 6th) are 100% editable.
                 </Text>
               </View>
               <TouchableOpacity onPress={() => setShowPublishModal(false)}>
@@ -858,89 +1121,188 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
               </TouchableOpacity>
             </View>
 
-            {/* Phased Step Switcher */}
+            {/* Draw Selector (Always visible at top of modal) */}
+            <View style={styles.modalDrawSection}>
+              <Text style={styles.modalDrawLabel}>SELECTED GAME DRAW</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
+                {drawsList.slice(0, 10).map((d) => {
+                  const isSelected = publishDrawId === d.id;
+                  const isResulted = d.status === 'RESULTED';
+                  return (
+                    <TouchableOpacity
+                      key={d.id}
+                      style={[
+                        styles.drawPill,
+                        isSelected && styles.drawPillActive,
+                      ]}
+                      onPress={() => loadDrawDetailsForModal(d.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.drawPillText,
+                          isSelected && styles.drawPillTextActive,
+                        ]}
+                      >
+                        {d.game_name} ({d.draw_time})
+                      </Text>
+                      {isResulted && <View style={styles.resultedDotSmall} />}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* Segment Switcher Tabs */}
             <View style={styles.stepSwitcherRow}>
               <TouchableOpacity
-                style={[styles.stepTabBtn, publishStep === 'prizes1to5' && styles.stepTabBtnActive]}
-                onPress={() => setPublishStep('prizes1to5')}
+                style={[styles.stepTabBtn, publishTab === 'firstPrize' && styles.stepTabBtnActive]}
+                onPress={() => setPublishTab('firstPrize')}
               >
                 <Text
                   style={[
                     styles.stepTabBtnText,
-                    publishStep === 'prizes1to5' && styles.stepTabBtnTextActive,
+                    publishTab === 'firstPrize' && styles.stepTabBtnTextActive,
                   ]}
                 >
-                  Step 1: Prizes 1 - 5
+                  ⭐ 1st Prize {firstPrize ? `(${firstPrize})` : ''}
                 </Text>
               </TouchableOpacity>
+
               <TouchableOpacity
-                style={[styles.stepTabBtn, publishStep === 'sixthPrizes' && styles.stepTabBtnActive]}
-                onPress={() => setPublishStep('sixthPrizes')}
+                style={[styles.stepTabBtn, publishTab === 'prizes2to5' && styles.stepTabBtnActive]}
+                onPress={() => setPublishTab('prizes2to5')}
               >
                 <Text
                   style={[
                     styles.stepTabBtnText,
-                    publishStep === 'sixthPrizes' && styles.stepTabBtnTextActive,
+                    publishTab === 'prizes2to5' && styles.stepTabBtnTextActive,
                   ]}
                 >
-                  Step 2: 6th Prizes ({sixthList.length})
+                  🏆 2nd - 5th
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.stepTabBtn, publishTab === 'sixthPrizes' && styles.stepTabBtnActive]}
+                onPress={() => setPublishTab('sixthPrizes')}
+              >
+                <Text
+                  style={[
+                    styles.stepTabBtnText,
+                    publishTab === 'sixthPrizes' && styles.stepTabBtnTextActive,
+                  ]}
+                >
+                  🎯 6th ({sixthList.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.stepTabBtn, publishTab === 'summary' && styles.stepTabBtnActive]}
+                onPress={() => setPublishTab('summary')}
+              >
+                <Text
+                  style={[
+                    styles.stepTabBtnText,
+                    publishTab === 'summary' && styles.stepTabBtnTextActive,
+                  ]}
+                >
+                  📋 Summary
                 </Text>
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={true} style={{ flexGrow: 0, maxHeight: 440 }}>
-              {publishStep === 'prizes1to5' ? (
-                <View>
-                  {/* Select Draw (if not editing) */}
-                  {!isEditingResult && (
-                    <>
-                      <Text style={styles.inputLabel}>Select Game Draw</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                        {drawsList.slice(0, 6).map((d) => (
-                          <TouchableOpacity
-                            key={d.id}
-                            style={[
-                              styles.drawPill,
-                              publishDrawId === d.id && styles.drawPillActive,
-                            ]}
-                            onPress={() => setPublishDrawId(d.id)}
-                          >
-                            <Text
-                              style={[
-                                styles.drawPillText,
-                                publishDrawId === d.id && styles.drawPillTextActive,
-                              ]}
-                            >
-                              {d.game_name} ({d.draw_time})
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    </>
-                  )}
+              {/* TAB 1: 1ST PRIZE ONLY */}
+              {publishTab === 'firstPrize' && (
+                <View style={styles.tabContentContainer}>
+                  <View style={styles.firstPrizeCard}>
+                    <View style={styles.prizeBadgeRow}>
+                      <Text style={styles.firstPrizeBadge}>⭐ 1ST PRIZE (MANDATORY)</Text>
+                      {isEditingResult && (
+                        <View style={styles.statusBadge}>
+                          <Text style={styles.statusBadgeText}>EDITABLE</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.firstPrizeInstruction}>
+                      Publish 1st prize alone as soon as the draw is announced. 1st Prize, BOX, and position winners (A, B, C, AB, BC, AC) will be evaluated immediately!
+                    </Text>
 
-                  {/* 1st Prize */}
-                  <Text style={styles.inputLabel}>1st Prize (3 Digits)*</Text>
-                  <View style={styles.inputWithClearRow}>
-                    <TextInput
-                      style={styles.modalInputWithClear}
-                      placeholder="e.g. 737"
-                      placeholderTextColor="#94A3B8"
-                      maxLength={3}
-                      keyboardType="numeric"
-                      value={firstPrize}
-                      onChangeText={setFirstPrize}
-                    />
-                    {firstPrize.length > 0 && (
-                      <TouchableOpacity
-                        style={styles.clearFieldBtn}
-                        onPress={() => setFirstPrize('')}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        <X size={15} color="#DC2626" />
-                      </TouchableOpacity>
-                    )}
+                    <Text style={styles.inputLabel}>1st Prize Winning Number (3 Digits)*</Text>
+                    <View style={styles.inputWithClearRow}>
+                      <TextInput
+                        style={[styles.modalInputWithClear, styles.firstPrizeInput]}
+                        placeholder="e.g. 737"
+                        placeholderTextColor="#94A3B8"
+                        maxLength={3}
+                        keyboardType="numeric"
+                        value={firstPrize}
+                        onChangeText={setFirstPrize}
+                      />
+                      {firstPrize.length > 0 && (
+                        <TouchableOpacity
+                          style={styles.clearFieldBtn}
+                          onPress={() => setFirstPrize('')}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        >
+                          <X size={15} color="#DC2626" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {/* Dedicated 1st Prize Publish Button */}
+                    <TouchableOpacity
+                      style={[
+                        styles.publishFirstPrizeBtn,
+                        (!firstPrize.trim() || publishing) && styles.publishBtnDisabled,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={handlePublishFirstPrizeOnly}
+                      disabled={publishing || !firstPrize.trim()}
+                    >
+                      {publishing ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <>
+                          <Sparkles size={16} color="#FFFFFF" />
+                          <Text style={styles.publishFirstPrizeBtnText}>
+                            {isEditingResult ? 'Update 1st Prize' : 'Publish 1st Prize Only'}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
                   </View>
+
+                  {/* Switch to next prizes */}
+                  <TouchableOpacity
+                    style={styles.nextStepBtn}
+                    onPress={() => setPublishTab('prizes2to5')}
+                  >
+                    <Text style={styles.nextStepBtnText}>Next: Enter 2nd - 5th Prizes →</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* TAB 2: 2ND - 5TH PRIZES */}
+              {publishTab === 'prizes2to5' && (
+                <View style={styles.tabContentContainer}>
+                  {/* 1st Prize status preview */}
+                  <View style={styles.firstPrizePreviewBar}>
+                    <Text style={styles.firstPrizePreviewLabel}>1st Prize:</Text>
+                    <Text style={styles.firstPrizePreviewVal}>
+                      {firstPrize ? firstPrize : '⚠️ Not set yet'}
+                    </Text>
+                    <TouchableOpacity onPress={() => setPublishTab('firstPrize')}>
+                      <Text style={styles.firstPrizePreviewEdit}>Edit 1st</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.sectionHeading}>
+                    ENTER / EDIT 2ND, 3RD, 4TH & 5TH PRIZES
+                  </Text>
+                  <Text style={styles.sectionSubtitle}>
+                    All 4 prizes are editable. Clear any mistake with the (X) button.
+                  </Text>
 
                   {/* 2nd Prize */}
                   <Text style={styles.inputLabel}>2nd Prize (3 Digits)</Text>
@@ -1034,24 +1396,64 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                     )}
                   </View>
 
-                  {/* Action to proceed to 6th prizes */}
+                  {/* Dedicated 2nd - 5th Publish Button */}
                   <TouchableOpacity
-                    style={styles.nextStepBtn}
-                    onPress={() => setPublishStep('sixthPrizes')}
+                    style={[styles.publishSecondaryBtn, publishing && styles.publishBtnDisabled]}
+                    activeOpacity={0.85}
+                    onPress={handlePublishPrizes2to5}
+                    disabled={publishing}
                   >
-                    <Text style={styles.nextStepBtnText}>Next: Enter 6th Prizes ({sixthList.length}) →</Text>
+                    {publishing ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <Award size={16} color="#FFFFFF" />
+                        <Text style={styles.publishSecondaryBtnText}>
+                          Publish / Update 2nd - 5th Prizes
+                        </Text>
+                      </>
+                    )}
                   </TouchableOpacity>
+
+                  {/* Navigation row */}
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                    <TouchableOpacity
+                      style={styles.backStepBtn}
+                      onPress={() => setPublishTab('firstPrize')}
+                    >
+                      <Text style={styles.backStepBtnText}>← 1st Prize</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.nextStepBtn, { flex: 1, marginTop: 0 }]}
+                      onPress={() => setPublishTab('sixthPrizes')}
+                    >
+                      <Text style={styles.nextStepBtnText}>Next: 6th Prizes →</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              ) : (
-                <View>
-                  {/* Step 2: All 6th Prizes Later - Large & Scrollable */}
-                  <Text style={styles.inputLabel}>
-                    Add 6th Prize Numbers (Type or Paste in Bulk)
+              )}
+
+              {/* TAB 3: 6TH PRIZES */}
+              {publishTab === 'sixthPrizes' && (
+                <View style={styles.tabContentContainer}>
+                  {/* 1st Prize preview */}
+                  <View style={styles.firstPrizePreviewBar}>
+                    <Text style={styles.firstPrizePreviewLabel}>1st Prize:</Text>
+                    <Text style={styles.firstPrizePreviewVal}>
+                      {firstPrize ? firstPrize : '⚠️ Not set yet'}
+                    </Text>
+                    <TouchableOpacity onPress={() => setPublishTab('firstPrize')}>
+                      <Text style={styles.firstPrizePreviewEdit}>Edit 1st</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.sectionHeading}>
+                    ENTER / EDIT 6TH PRIZES (CONSOLATIONS)
                   </Text>
-                  <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 6 }}>
+                  <Text style={styles.sectionSubtitle}>
                     Enter 3-digit numbers separated by spaces, commas, or new lines.
                   </Text>
-                  
+
                   <View style={{ marginBottom: 12 }}>
                     <TextInput
                       style={styles.largeSixthTextArea}
@@ -1099,7 +1501,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                     )}
                   </View>
 
-                  {/* Sixth numbers chips in dedicated scrollable box */}
+                  {/* Sixth numbers chips */}
                   {sixthList.length === 0 ? (
                     <View style={styles.emptySixthBox}>
                       <Text style={styles.emptySixthText}>
@@ -1109,7 +1511,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                   ) : (
                     <View style={styles.scrollableChipsWrapper}>
                       <ScrollView
-                        style={{ maxHeight: 260 }}
+                        style={{ maxHeight: 220 }}
                         nestedScrollEnabled={true}
                         showsVerticalScrollIndicator={true}
                       >
@@ -1132,29 +1534,130 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                     </View>
                   )}
 
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+                  {/* Dedicated 6th Prize Publish Button */}
+                  <TouchableOpacity
+                    style={[styles.publishSixthBtn, publishing && styles.publishBtnDisabled]}
+                    activeOpacity={0.85}
+                    onPress={handlePublishSixthPrizes}
+                    disabled={publishing}
+                  >
+                    {publishing ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <Trophy size={16} color="#FFFFFF" />
+                        <Text style={styles.publishSixthBtnText}>
+                          Publish / Update 6th Prizes ({sixthList.length})
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Navigation row */}
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
                     <TouchableOpacity
                       style={styles.backStepBtn}
-                      onPress={() => setPublishStep('prizes1to5')}
+                      onPress={() => setPublishTab('prizes2to5')}
                     >
-                      <Text style={styles.backStepBtnText}>← Back to 1st-5th</Text>
+                      <Text style={styles.backStepBtnText}>← 2nd - 5th</Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity
-                      style={[styles.publishActionBtn, { flex: 1.5, marginTop: 0 }]}
-                      activeOpacity={0.85}
-                      onPress={handlePublish}
-                      disabled={publishing}
+                      style={[styles.nextStepBtn, { flex: 1, marginTop: 0 }]}
+                      onPress={() => setPublishTab('summary')}
                     >
-                      {publishing ? (
-                        <ActivityIndicator color="#FFFFFF" size="small" />
-                      ) : (
-                        <Text style={styles.publishActionBtnText}>
-                          {isEditingResult ? 'Save & Update Result' : 'Publish & Calculate Winners'}
-                        </Text>
-                      )}
+                      <Text style={styles.nextStepBtnText}>Review All Prizes →</Text>
                     </TouchableOpacity>
                   </View>
+                </View>
+              )}
+
+              {/* TAB 4: SUMMARY & MASTER PUBLISH */}
+              {publishTab === 'summary' && (
+                <View style={styles.tabContentContainer}>
+                  <Text style={styles.sectionHeading}>OFFICIAL PRIZE SUMMARY</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Review all entered prizes below before publishing or updating.
+                  </Text>
+
+                  <View style={styles.summaryCard}>
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>1st Prize:</Text>
+                      <Text style={[styles.summaryVal, { color: '#B45309', fontWeight: '800' }]}>
+                        {firstPrize || 'NOT ENTERED'}
+                      </Text>
+                      <TouchableOpacity onPress={() => setPublishTab('firstPrize')}>
+                        <Text style={styles.summaryEditLink}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>2nd Prize:</Text>
+                      <Text style={styles.summaryVal}>{secondPrize || '-'}</Text>
+                      <TouchableOpacity onPress={() => setPublishTab('prizes2to5')}>
+                        <Text style={styles.summaryEditLink}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>3rd Prize:</Text>
+                      <Text style={styles.summaryVal}>{thirdPrize || '-'}</Text>
+                      <TouchableOpacity onPress={() => setPublishTab('prizes2to5')}>
+                        <Text style={styles.summaryEditLink}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>4th Prize:</Text>
+                      <Text style={styles.summaryVal}>{fourthPrize || '-'}</Text>
+                      <TouchableOpacity onPress={() => setPublishTab('prizes2to5')}>
+                        <Text style={styles.summaryEditLink}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>5th Prize:</Text>
+                      <Text style={styles.summaryVal}>{fifthPrize || '-'}</Text>
+                      <TouchableOpacity onPress={() => setPublishTab('prizes2to5')}>
+                        <Text style={styles.summaryEditLink}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={[styles.summaryRow, { borderBottomWidth: 0 }]}>
+                      <Text style={styles.summaryLabel}>6th Prizes:</Text>
+                      <Text style={styles.summaryVal}>
+                        {sixthList.length > 0 ? `${sixthList.length} numbers configured` : 'None'}
+                      </Text>
+                      <TouchableOpacity onPress={() => setPublishTab('sixthPrizes')}>
+                        <Text style={styles.summaryEditLink}>Edit</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Master Publish All Button */}
+                  <TouchableOpacity
+                    style={[styles.publishMasterBtn, publishing && styles.publishBtnDisabled]}
+                    activeOpacity={0.85}
+                    onPress={handlePublishAll}
+                    disabled={publishing}
+                  >
+                    {publishing ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <CheckCircle2 size={18} color="#FFFFFF" />
+                        <Text style={styles.publishMasterBtnText}>
+                          Save & Publish All Configured Prizes
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.backStepBtn, { marginTop: 10 }]}
+                    onPress={() => setPublishTab('firstPrize')}
+                  >
+                    <Text style={styles.backStepBtnText}>← Back to 1st Prize</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </ScrollView>
@@ -2069,5 +2572,223 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEE2E2',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  editResultSmallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  editResultSmallBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#007BFF',
+  },
+  modalDrawSection: {
+    marginBottom: 10,
+  },
+  modalDrawLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  resultedDotSmall: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    marginLeft: 4,
+  },
+  tabContentContainer: {
+    paddingTop: 4,
+    paddingBottom: 16,
+  },
+  firstPrizeCard: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1.5,
+    borderColor: '#FCD34D',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  prizeBadgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  firstPrizeBadge: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#B45309',
+    letterSpacing: 0.5,
+  },
+  statusBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  statusBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#D97706',
+  },
+  firstPrizeInstruction: {
+    fontSize: 12,
+    color: '#92400E',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  firstPrizeInput: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#B45309',
+    letterSpacing: 2,
+  },
+  publishFirstPrizeBtn: {
+    backgroundColor: '#D97706',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginTop: 12,
+  },
+  publishFirstPrizeBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  publishSecondaryBtn: {
+    backgroundColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginTop: 14,
+  },
+  publishSecondaryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  publishSixthBtn: {
+    backgroundColor: '#059669',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginTop: 14,
+  },
+  publishSixthBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  publishMasterBtn: {
+    backgroundColor: '#007BFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 8,
+    paddingVertical: 14,
+    marginTop: 16,
+  },
+  publishMasterBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  publishBtnDisabled: {
+    opacity: 0.6,
+  },
+  firstPrizePreviewBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  firstPrizePreviewLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1E40AF',
+    marginRight: 6,
+  },
+  firstPrizePreviewVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E40AF',
+    flex: 1,
+  },
+  firstPrizePreviewEdit: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563EB',
+    textDecorationLine: 'underline',
+  },
+  sectionHeading: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#334155',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  sectionSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginBottom: 8,
+  },
+  summaryCard: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 8,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  summaryLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#475569',
+    width: 90,
+  },
+  summaryVal: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    flex: 1,
+  },
+  summaryEditLink: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#007BFF',
+    paddingHorizontal: 6,
   },
 });
