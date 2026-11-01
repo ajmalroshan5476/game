@@ -303,13 +303,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
     const queryParams = req.query as any;
 
     try {
-      const tickets = await TicketService.getTickets(
+      const result = await TicketService.getTickets(
         orgId,
         userId,
         queryParams,
         role === 'ADMIN'
       );
-      return { tickets };
+      if (Array.isArray(result)) {
+        return { tickets: result };
+      }
+      return result;
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
     }
@@ -553,7 +556,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/sales', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.userId : userId;
+    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
 
     return await ReportService.getSalesReport(orgId, effectiveUserId, queryParams);
   });
@@ -561,7 +564,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/winnings', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.userId : userId;
+    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
 
     return await ReportService.getWinningsReport(orgId, effectiveUserId, queryParams);
   });
@@ -569,7 +572,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/bill-wise', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.userId : userId;
+    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
 
     return await ReportService.getWinningBillWise(orgId, effectiveUserId, queryParams);
   });
@@ -577,7 +580,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/number-wise', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.userId : userId;
+    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
     return await ReportService.getNumberWiseReport(orgId, effectiveUserId, queryParams);
   });
 

@@ -12,6 +12,8 @@ import {
   Modal,
 } from 'react-native';
 import { api } from '../api/client';
+import { useAuth } from '../context/AuthContext';
+import { EditTicketModal } from '../components/EditTicketModal';
 import { colors } from '../theme/colors';
 import {
   ArrowLeft,
@@ -27,16 +29,26 @@ import {
   CheckSquare,
   Square,
   Filter,
+  User,
+  Clock,
+  Trash2,
+  Edit3,
+  History,
+  AlertCircle,
 } from 'lucide-react-native';
+
+export type ReportType = 'sales' | 'winnings' | 'bill-wise' | 'number-wise' | 'net-pay' | 'ticket-history';
 
 interface ReportsScreenProps {
   onBack: () => void;
+  initialTab?: ReportType;
 }
 
-type ReportType = 'sales' | 'winnings' | 'bill-wise' | 'number-wise' | 'net-pay';
+export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
 
-export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
-  const [reportType, setReportType] = useState<ReportType>('sales');
+  const [reportType, setReportType] = useState<ReportType>(initialTab || 'sales');
 
   // Filter States
   const [games, setGames] = useState<any[]>([]);
@@ -48,10 +60,15 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
   const [ticketNumber, setTicketNumber] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('ALL');
   const [selectedMode, setSelectedMode] = useState('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [groupWithoutTicketName, setGroupWithoutTicketName] = useState(false);
 
+  // Admin User Filter
+  const [users, setUsers] = useState<any[]>([]);
+  const [targetUserId, setTargetUserId] = useState<string>('ALL');
+
   // Dropdown Modals
-  const [pickerType, setPickerType] = useState<'ticket' | 'group' | 'mode' | null>(null);
+  const [pickerType, setPickerType] = useState<'ticket' | 'group' | 'mode' | 'user' | 'status' | null>(null);
 
   // Toggle filters visibility (collapsed by default to show tickets cleanly like screenshot)
   const [showFilters, setShowFilters] = useState(false);
@@ -60,19 +77,47 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
 
+  // Ticket Editing & Cancellation States
+  const [editingTicket, setEditingTicket] = useState<any | null>(null);
+  const [userPrices, setUserPrices] = useState<any[]>([]);
+  const [cancellingTicketNum, setCancellingTicketNum] = useState<string | null>(null);
+
   useEffect(() => {
     loadGames();
-  }, []);
+    if (isAdmin) {
+      loadUsers();
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchReport();
-  }, [reportType, selectedTicket, fromDate, toDate, singleDate, selectedGroup, selectedMode, groupWithoutTicketName]);
+  }, [
+    reportType,
+    selectedTicket,
+    fromDate,
+    toDate,
+    singleDate,
+    selectedGroup,
+    selectedMode,
+    groupWithoutTicketName,
+    targetUserId,
+    selectedStatus,
+  ]);
 
   const loadGames = async () => {
     try {
       const res = await api.getGames();
       setGames(res.games || []);
     } catch {}
+  };
+
+  const loadUsers = async () => {
+    try {
+      const res = await api.getUsers();
+      setUsers(res.users || []);
+    } catch (err) {
+      console.warn('Failed to load users for filter:', err);
+    }
   };
 
   const handleSyncDates = () => {
@@ -109,6 +154,12 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
     if (selectedMode && selectedMode !== 'ALL') {
       baseParams.mode = selectedMode;
     }
+    if (targetUserId && targetUserId !== 'ALL') {
+      baseParams.targetUserId = targetUserId;
+    }
+    if (selectedStatus && selectedStatus !== 'ALL') {
+      baseParams.status = selectedStatus;
+    }
 
     try {
       if (reportType === 'sales') {
@@ -135,12 +186,45 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
         baseParams.toDate = toDate;
         const res = await api.getNetPayReport(baseParams);
         setData(res);
+      } else if (reportType === 'ticket-history') {
+        baseParams.fromDate = fromDate;
+        baseParams.toDate = toDate;
+        baseParams.limit = 100;
+        const res = await api.getTickets(baseParams);
+        setData(res);
       }
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to generate report');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCancelHistoryTicket = (t: any) => {
+    if (!t) return;
+    Alert.alert(
+      'Confirm Cancellation',
+      `Cancel Ticket #${t.ticket_number}?\n\nThis will release booked number allocations and reverse sales liability for seller ${t.seller_username || ''}.`,
+      [
+        { text: 'No, Keep Ticket', style: 'cancel' },
+        {
+          text: 'Yes, Cancel Ticket',
+          style: 'destructive',
+          onPress: async () => {
+            setCancellingTicketNum(t.ticket_number);
+            try {
+              await api.cancelTicket(t.ticket_number);
+              Alert.alert('Success', `Ticket #${t.ticket_number} has been cancelled.`);
+              fetchReport();
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to cancel ticket');
+            } finally {
+              setCancellingTicketNum(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Helper to format date cleanly: YYYY-MM-DD
@@ -249,12 +333,14 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
         return 'Number Wise Report';
       case 'net-pay':
         return 'Net Pay';
+      case 'ticket-history':
+        return 'Ticket History';
     }
   };
 
-  const isOrangeButton = reportType === 'sales' || reportType === 'winnings' || reportType === 'bill-wise';
+  const isOrangeButton = reportType === 'sales' || reportType === 'winnings' || reportType === 'bill-wise' || reportType === 'ticket-history';
   const buttonColor = isOrangeButton ? '#FF5722' : '#007BFF';
-  const buttonText = reportType === 'bill-wise' ? 'Search' : 'Generate Report';
+  const buttonText = reportType === 'bill-wise' || reportType === 'ticket-history' ? 'Search' : 'Generate Report';
 
   return (
     <View style={styles.container}>
@@ -278,7 +364,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
         </View>
       </View>
 
-      {/* Sub-tab switcher to switch between the 5 report screens (Visible when filters expanded) */}
+      {/* Sub-tab switcher to switch between the report screens (Visible when filters expanded) */}
       {showFilters && (
         <View style={styles.tabBar}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
@@ -288,6 +374,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
               { id: 'bill-wise', label: 'Bill Wise' },
               { id: 'number-wise', label: 'Number Wise' },
               { id: 'net-pay', label: 'Net Pay' },
+              ...(isAdmin ? [{ id: 'ticket-history', label: 'Ticket History' }] : []),
             ].map((t) => {
               const active = reportType === t.id;
               return (
@@ -310,143 +397,177 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
         {/* REPLICATED FILTER CARD (Exact layout from screenshots - toggleable) */}
         {showFilters && (
           <View style={styles.filterCard}>
-            {/* Row 1: Ticket / Game Dropdown */}
-          <Text style={styles.fieldLabel}>
-            {reportType === 'bill-wise' ? 'Draw Time' : 'Ticket'}
-          </Text>
-          <TouchableOpacity
-            style={styles.dropdownBtn}
-            onPress={() => setPickerType('ticket')}
-          >
-            <Text style={styles.dropdownBtnText}>
-              {selectedTicket === 'ALL'
-                ? 'ALL'
-                : games.find((g) => g.id === selectedTicket || g.name === selectedTicket)?.name || selectedTicket}
-            </Text>
-            <ChevronDown size={18} color="#64748B" />
-          </TouchableOpacity>
-
-          {/* Row 2: Date Inputs */}
-          {reportType === 'bill-wise' || reportType === 'number-wise' ? (
-            // Single Date layout
-            <View style={styles.dateBlockSingle}>
-              <Text style={styles.fieldLabel}>Date</Text>
-              <TextInput
-                style={styles.textInput}
-                value={singleDate}
-                onChangeText={setSingleDate}
-                placeholder="2026-10-25"
-                placeholderTextColor="#94A3B8"
-              />
-            </View>
-          ) : (
-            // From / To layout with '=' button in between
-            <View style={styles.dateRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>From</Text>
-                <TextInput
-                  style={[styles.textInput, { textAlign: 'center' }]}
-                  value={fromDate}
-                  onChangeText={setFromDate}
-                  placeholder="2026-10-25"
-                  placeholderTextColor="#94A3B8"
-                />
+            {/* Row 0: Users Under Admin (Seller) for Admin */}
+            {isAdmin && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={styles.fieldLabel}>User Under Admin (Seller)</Text>
+                <TouchableOpacity
+                  style={styles.dropdownBtn}
+                  onPress={() => setPickerType('user')}
+                >
+                  <Text style={styles.dropdownBtnText}>
+                    {targetUserId === 'ALL'
+                      ? 'ALL (All Users)'
+                      : users.find((u) => u.id === targetUserId)?.username || targetUserId}
+                  </Text>
+                  <ChevronDown size={18} color="#64748B" />
+                </TouchableOpacity>
               </View>
-
-              {/* '=' Sync Button matching screenshot */}
-              <TouchableOpacity
-                style={[
-                  styles.equalButton,
-                  { backgroundColor: reportType === 'net-pay' ? '#007BFF' : '#FF5722' },
-                ]}
-                activeOpacity={0.8}
-                onPress={handleSyncDates}
-              >
-                <Text style={styles.equalButtonText}>=</Text>
-              </TouchableOpacity>
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>To</Text>
-                <TextInput
-                  style={[styles.textInput, { textAlign: 'center' }]}
-                  value={toDate}
-                  onChangeText={setToDate}
-                  placeholder="2026-10-25"
-                  placeholderTextColor="#94A3B8"
-                />
-              </View>
-            </View>
-          )}
-
-          {/* Row 3: Ticket Number (Optional) */}
-          <Text style={styles.fieldLabel}>Ticket Number</Text>
-          <TextInput
-            style={styles.textInput}
-            value={ticketNumber}
-            onChangeText={setTicketNumber}
-            placeholder={reportType === 'bill-wise' ? 'Optional' : 'Ticket Number'}
-            placeholderTextColor="#94A3B8"
-            autoCapitalize="characters"
-          />
-
-          {/* Row 4: Group & Mode */}
-          <View style={styles.twoColRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>Group</Text>
-              <TouchableOpacity
-                style={styles.dropdownBtn}
-                onPress={() => setPickerType('group')}
-              >
-                <Text style={styles.dropdownBtnText}>{selectedGroup}</Text>
-                <ChevronDown size={18} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={{ flex: 1 }}>
-              <Text style={styles.fieldLabel}>Mode</Text>
-              <TouchableOpacity
-                style={styles.dropdownBtn}
-                onPress={() => setPickerType('mode')}
-              >
-                <Text style={styles.dropdownBtnText}>{selectedMode}</Text>
-                <ChevronDown size={18} color="#64748B" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Optional Checkbox for Number Wise Report */}
-          {reportType === 'number-wise' && (
-            <TouchableOpacity
-              style={styles.checkboxRow}
-              activeOpacity={0.8}
-              onPress={() => setGroupWithoutTicketName(!groupWithoutTicketName)}
-            >
-              {groupWithoutTicketName ? (
-                <CheckSquare size={18} color="#007BFF" />
-              ) : (
-                <Square size={18} color="#94A3B8" />
-              )}
-              <Text style={styles.checkboxLabel}>Group without ticket name</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Main Action Button (Generate Report / Search) */}
-          <TouchableOpacity
-            style={[styles.submitButton, { backgroundColor: buttonColor }]}
-            activeOpacity={0.85}
-            onPress={() => {
-              setShowFilters(false);
-              fetchReport();
-            }}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <Text style={styles.submitButtonText}>{buttonText}</Text>
             )}
-          </TouchableOpacity>
-        </View>
+
+            {/* Row 1: Ticket / Game Dropdown */}
+            <Text style={styles.fieldLabel}>
+              {reportType === 'bill-wise' ? 'Draw Time' : 'Ticket'}
+            </Text>
+            <TouchableOpacity
+              style={styles.dropdownBtn}
+              onPress={() => setPickerType('ticket')}
+            >
+              <Text style={styles.dropdownBtnText}>
+                {selectedTicket === 'ALL'
+                  ? 'ALL'
+                  : games.find((g) => g.id === selectedTicket || g.name === selectedTicket)?.name || selectedTicket}
+              </Text>
+              <ChevronDown size={18} color="#64748B" />
+            </TouchableOpacity>
+
+            {/* Row 2: Date Inputs */}
+            {reportType === 'bill-wise' || reportType === 'number-wise' ? (
+              // Single Date layout
+              <View style={styles.dateBlockSingle}>
+                <Text style={styles.fieldLabel}>Date</Text>
+                <TextInput
+                  style={styles.textInput}
+                  value={singleDate}
+                  onChangeText={setSingleDate}
+                  placeholder="2026-10-25"
+                  placeholderTextColor="#94A3B8"
+                />
+              </View>
+            ) : (
+              // From / To layout with '=' button in between
+              <View style={styles.dateRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>From</Text>
+                  <TextInput
+                    style={[styles.textInput, { textAlign: 'center' }]}
+                    value={fromDate}
+                    onChangeText={setFromDate}
+                    placeholder="2026-10-25"
+                    placeholderTextColor="#94A3B8"
+                  />
+                </View>
+
+                {/* '=' Sync Button matching screenshot */}
+                <TouchableOpacity
+                  style={[
+                    styles.equalButton,
+                    { backgroundColor: reportType === 'net-pay' ? '#007BFF' : '#FF5722' },
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={handleSyncDates}
+                >
+                  <Text style={styles.equalButtonText}>=</Text>
+                </TouchableOpacity>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>To</Text>
+                  <TextInput
+                    style={[styles.textInput, { textAlign: 'center' }]}
+                    value={toDate}
+                    onChangeText={setToDate}
+                    placeholder="2026-10-25"
+                    placeholderTextColor="#94A3B8"
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Row 3: Ticket Number (Optional) */}
+            <Text style={styles.fieldLabel}>Ticket Number / Search</Text>
+            <TextInput
+              style={styles.textInput}
+              value={ticketNumber}
+              onChangeText={setTicketNumber}
+              placeholder={reportType === 'bill-wise' ? 'Optional' : 'Ticket Number or Customer'}
+              placeholderTextColor="#94A3B8"
+              autoCapitalize="characters"
+            />
+
+            {/* Row 4: Group & Mode */}
+            <View style={styles.twoColRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Group</Text>
+                <TouchableOpacity
+                  style={styles.dropdownBtn}
+                  onPress={() => setPickerType('group')}
+                >
+                  <Text style={styles.dropdownBtnText}>{selectedGroup}</Text>
+                  <ChevronDown size={18} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fieldLabel}>Mode</Text>
+                <TouchableOpacity
+                  style={styles.dropdownBtn}
+                  onPress={() => setPickerType('mode')}
+                >
+                  <Text style={styles.dropdownBtnText}>{selectedMode}</Text>
+                  <ChevronDown size={18} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Row 5: Status filter for Ticket History */}
+            {reportType === 'ticket-history' && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={styles.fieldLabel}>Ticket Status</Text>
+                <TouchableOpacity
+                  style={styles.dropdownBtn}
+                  onPress={() => setPickerType('status')}
+                >
+                  <Text style={styles.dropdownBtnText}>
+                    {selectedStatus === 'ALL' ? 'ALL Status' : selectedStatus}
+                  </Text>
+                  <ChevronDown size={18} color="#64748B" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Optional Checkbox for Number Wise Report */}
+            {reportType === 'number-wise' && (
+              <TouchableOpacity
+                style={styles.checkboxRow}
+                activeOpacity={0.8}
+                onPress={() => setGroupWithoutTicketName(!groupWithoutTicketName)}
+              >
+                {groupWithoutTicketName ? (
+                  <CheckSquare size={18} color="#007BFF" />
+                ) : (
+                  <Square size={18} color="#94A3B8" />
+                )}
+                <Text style={styles.checkboxLabel}>Group without ticket name</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Main Action Button (Generate Report / Search) */}
+            <TouchableOpacity
+              style={[styles.submitButton, { backgroundColor: buttonColor }]}
+              activeOpacity={0.85}
+              onPress={() => {
+                setShowFilters(false);
+                fetchReport();
+              }}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.submitButtonText}>{buttonText}</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* REAL-TIME DATA DISPLAY AREA */}
@@ -666,31 +787,149 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
                 </View>
               )}
 
-              {/* 5. NET PAY REPORT - Excel Table */}
-              {reportType === 'net-pay' && data && (
-                <View>
-                  <Text style={styles.resultsHeading}>
-                    SETTLEMENT BREAKDOWN BY GAME ({data.length || 0})
-                  </Text>
-                  {(!Array.isArray(data) || data.length === 0) ? (
-                    <Text style={styles.noData}>No settlement transactions found.</Text>
-                  ) : (
-                    <View style={styles.excelTableContainer}>
-                      <View style={styles.excelTableHeader}>
-                        <Text style={[styles.excelHeaderCell, { flex: 1.4 }]}>GAME</Text>
-                        <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>SALES</Text>
-                        <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>PRIZES</Text>
-                        <Text style={[styles.excelHeaderCell, { flex: 1 }]}>COMM</Text>
-                        <Text style={[styles.excelHeaderCell, { flex: 1.3, borderRightWidth: 0 }]}>NET PAY</Text>
+              {/* 5. NET PAY REPORT - Excel Table with Daily Tally */}
+              {reportType === 'net-pay' && data && (() => {
+                const netPayItems: any[] = Array.isArray(data) ? data : (data?.items || []);
+                const netPaySummary = !Array.isArray(data) && data?.summary ? data.summary : {
+                  totalSales: netPayItems.reduce((acc: number, i: any) => acc + (parseFloat(i.totalSales) || 0), 0),
+                  totalPrizes: netPayItems.reduce((acc: number, i: any) => acc + (parseFloat(i.totalPrizes) || 0), 0),
+                  totalCommission: netPayItems.reduce((acc: number, i: any) => acc + (parseFloat(i.totalCommission) || 0), 0),
+                  netPay: netPayItems.reduce((acc: number, i: any) => acc + (parseFloat(i.netPay) || 0), 0),
+                };
+
+                return (
+                  <View style={{ width: '100%' }}>
+                    {/* Prominent Daily Net Pay Tally Card */}
+                    <View style={styles.netPayTallyCard}>
+                      <View style={styles.netPayTallyHeader}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.netPayTallyTitle}>
+                            {selectedTicket === 'ALL'
+                              ? 'DAILY NET PAY TALLY (ALL GAMES)'
+                              : `${selectedTicket} NET PAY TALLY`}
+                          </Text>
+                          <Text style={styles.netPayTallySubtitle}>
+                            Date: {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}
+                            {targetUserId !== 'ALL' && users.find((u) => u.id === targetUserId)
+                              ? ` • Seller: ${users.find((u) => u.id === targetUserId)?.username}`
+                              : ' • All Users'}
+                          </Text>
+                        </View>
+                        <View
+                          style={[
+                            styles.netPayBadge,
+                            { backgroundColor: netPaySummary.netPay >= 0 ? '#DCFCE7' : '#FEE2E2' },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.netPayBadgeText,
+                              { color: netPaySummary.netPay >= 0 ? '#15803D' : '#B91C1C' },
+                            ]}
+                          >
+                            {netPaySummary.netPay >= 0 ? 'RECEIVABLE' : 'PAYABLE'}
+                          </Text>
+                        </View>
                       </View>
-                      {data.map((np: any, idx: number) => {
-                        const isPositive = np.netPay >= 0;
-                        return (
-                          <View key={idx} style={styles.excelTableRow}>
-                            <Text style={[styles.excelTableCell, { flex: 1.4, fontWeight: '700' }]}>{np.gameName}</Text>
-                            <Text style={[styles.excelTableCell, { flex: 1.1 }]}>₹{np.totalSales}</Text>
-                            <Text style={[styles.excelTableCell, { flex: 1.1, color: '#047857' }]}>₹{np.totalPrizes}</Text>
-                            <Text style={[styles.excelTableCell, { flex: 1, color: '#2563EB' }]}>₹{np.totalCommission}</Text>
+
+                      <View style={styles.netPayGrid}>
+                        <View style={styles.netPayGridItem}>
+                          <Text style={styles.netPayGridLabel}>TOTAL SALES</Text>
+                          <Text style={styles.netPayGridValue}>
+                            ₹{Number(netPaySummary.totalSales || 0).toFixed(2)}
+                          </Text>
+                        </View>
+                        <View style={styles.netPayGridItem}>
+                          <Text style={styles.netPayGridLabel}>TOTAL PRIZES</Text>
+                          <Text style={[styles.netPayGridValue, { color: '#047857' }]}>
+                            ₹{Number(netPaySummary.totalPrizes || 0).toFixed(2)}
+                          </Text>
+                        </View>
+                        <View style={styles.netPayGridItem}>
+                          <Text style={styles.netPayGridLabel}>SUPER COMM</Text>
+                          <Text style={[styles.netPayGridValue, { color: '#2563EB' }]}>
+                            ₹{Number(netPaySummary.totalCommission || 0).toFixed(2)}
+                          </Text>
+                        </View>
+                        <View style={[styles.netPayGridItem, styles.netPayGridItemHighlight]}>
+                          <Text style={styles.netPayGridLabel}>DAY NET PAY</Text>
+                          <Text
+                            style={[
+                              styles.netPayGridValue,
+                              {
+                                color: netPaySummary.netPay >= 0 ? '#15803D' : '#B91C1C',
+                                fontSize: 15,
+                                fontWeight: '900',
+                              },
+                            ]}
+                          >
+                            ₹{Number(netPaySummary.netPay || 0).toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <Text style={styles.resultsHeading}>
+                      SETTLEMENT BREAKDOWN BY GAME ({netPayItems.length || 0})
+                    </Text>
+
+                    {netPayItems.length === 0 ? (
+                      <Text style={styles.noData}>No settlement transactions found for this date.</Text>
+                    ) : (
+                      <View style={styles.excelTableContainer}>
+                        <View style={styles.excelTableHeader}>
+                          <Text style={[styles.excelHeaderCell, { flex: 1.4 }]}>GAME</Text>
+                          <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>SALES</Text>
+                          <Text style={[styles.excelHeaderCell, { flex: 1.1 }]}>PRIZES</Text>
+                          <Text style={[styles.excelHeaderCell, { flex: 1 }]}>COMM</Text>
+                          <Text style={[styles.excelHeaderCell, { flex: 1.3, borderRightWidth: 0 }]}>NET PAY</Text>
+                        </View>
+
+                        {netPayItems.map((np: any, idx: number) => {
+                          const isPositive = np.netPay >= 0;
+                          return (
+                            <View key={idx} style={styles.excelTableRow}>
+                              <Text style={[styles.excelTableCell, { flex: 1.4, fontWeight: '700' }]}>{np.gameName}</Text>
+                              <Text style={[styles.excelTableCell, { flex: 1.1 }]}>₹{Number(np.totalSales || 0).toFixed(2)}</Text>
+                              <Text style={[styles.excelTableCell, { flex: 1.1, color: '#047857' }]}>₹{Number(np.totalPrizes || 0).toFixed(2)}</Text>
+                              <Text style={[styles.excelTableCell, { flex: 1, color: '#2563EB' }]}>₹{Number(np.totalCommission || 0).toFixed(2)}</Text>
+                              <Text
+                                style={[
+                                  styles.excelTableCell,
+                                  {
+                                    flex: 1.3,
+                                    borderRightWidth: 0,
+                                    fontWeight: '900',
+                                    color: isPositive ? colors.emeraldDark : colors.danger,
+                                  },
+                                ]}
+                              >
+                                ₹{Number(np.netPay || 0).toFixed(2)}
+                              </Text>
+                            </View>
+                          );
+                        })}
+
+                        {/* Tallied row for ALL games */}
+                        {selectedTicket === 'ALL' && netPayItems.length > 0 && (
+                          <View
+                            style={[
+                              styles.excelTableRow,
+                              { backgroundColor: '#F1F5F9', borderTopWidth: 2, borderTopColor: '#94A3B8' },
+                            ]}
+                          >
+                            <Text style={[styles.excelTableCell, { flex: 1.4, fontWeight: '900', color: '#0F172A' }]}>
+                              TOTAL / ALL GAMES
+                            </Text>
+                            <Text style={[styles.excelTableCell, { flex: 1.1, fontWeight: '900', color: '#0F172A' }]}>
+                              ₹{Number(netPaySummary.totalSales || 0).toFixed(2)}
+                            </Text>
+                            <Text style={[styles.excelTableCell, { flex: 1.1, fontWeight: '900', color: '#047857' }]}>
+                              ₹{Number(netPaySummary.totalPrizes || 0).toFixed(2)}
+                            </Text>
+                            <Text style={[styles.excelTableCell, { flex: 1, fontWeight: '900', color: '#2563EB' }]}>
+                              ₹{Number(netPaySummary.totalCommission || 0).toFixed(2)}
+                            </Text>
                             <Text
                               style={[
                                 styles.excelTableCell,
@@ -698,16 +937,198 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
                                   flex: 1.3,
                                   borderRightWidth: 0,
                                   fontWeight: '900',
-                                  color: isPositive ? colors.emeraldDark : colors.danger,
+                                  color: netPaySummary.netPay >= 0 ? '#15803D' : '#B91C1C',
                                 },
                               ]}
                             >
-                              ₹{np.netPay}
+                              ₹{Number(netPaySummary.netPay || 0).toFixed(2)}
                             </Text>
                           </View>
-                        );
-                      })}
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })()}
+
+              {/* 6. TICKET HISTORY REPORT (Admin with Date, Game, Users under admin, etc.) */}
+              {reportType === 'ticket-history' && data && (
+                <View style={{ width: '100%' }}>
+                  {/* Summary Banner */}
+                  <View style={styles.summaryBanner}>
+                    <View style={styles.summaryStat}>
+                      <Text style={styles.summaryStatLabel}>Total Tickets</Text>
+                      <Text style={styles.summaryStatVal}>
+                        {data.summary?.total_bills ?? (data.tickets?.length || 0)}
+                      </Text>
                     </View>
+                    <View style={styles.summaryStat}>
+                      <Text style={styles.summaryStatLabel}>Total Units</Text>
+                      <Text style={styles.summaryStatVal}>
+                        {data.summary?.total_quantity ?? 0}
+                      </Text>
+                    </View>
+                    <View style={styles.summaryStat}>
+                      <Text style={styles.summaryStatLabel}>Total Sales</Text>
+                      <Text style={[styles.summaryStatVal, { color: colors.emeraldDark }]}>
+                        ₹{data.summary?.total_sales ?? 0}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Filter Metadata Pill */}
+                  <View style={styles.filterMetaPill}>
+                    <Text style={styles.filterMetaText}>
+                      Date: {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}
+                      {targetUserId !== 'ALL' && users.find((u) => u.id === targetUserId)
+                        ? ` • User: ${users.find((u) => u.id === targetUserId)?.username}`
+                        : ' • All Users Under Admin'}
+                      {selectedTicket !== 'ALL' ? ` • Game: ${selectedTicket}` : ''}
+                      {selectedMode !== 'ALL' ? ` • Mode: ${selectedMode}` : ''}
+                      {selectedGroup !== 'ALL' ? ` • Group: ${selectedGroup}` : ''}
+                      {selectedStatus !== 'ALL' ? ` • Status: ${selectedStatus}` : ''}
+                    </Text>
+                  </View>
+
+                  {(!data.tickets || data.tickets.length === 0) ? (
+                    <Text style={styles.noData}>
+                      No tickets entered by the selected user/filters in this period.
+                    </Text>
+                  ) : (
+                    data.tickets.map((item: any, idx: number) => {
+                      const billGame = formatBillGame(item);
+                      const billTime = formatBillTime(item.created_at);
+                      const billDate = formatBillDate(item.draw_date, item.created_at);
+                      const totalPriceStr = parseFloat(item.total_amount || 0).toFixed(2);
+                      const sortedEntries = getSortedEntries(item.entries);
+                      const isCancelled = item.status === 'CANCELLED';
+                      const isResulted = item.draw_status === 'RESULTED';
+                      const isCutoff = item.isCutoffPassed;
+                      const canModify = !isCancelled && !isResulted && (isAdmin || !isCutoff);
+
+                      return (
+                        <View key={item.id || idx}>
+                          {idx > 0 && <View style={styles.billDivider} />}
+                          <View style={styles.billDetailedContainer}>
+                            {/* Blue Header Bar matching screenshot */}
+                            <View style={styles.billBlueHeader}>
+                              <View style={{ flex: 1.2 }}>
+                                <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
+                                <Text style={styles.billHeaderTime}>{billTime}</Text>
+                                {item.seller_username && (
+                                  <Text style={styles.ticketHistorySeller}>Seller: {item.seller_username}</Text>
+                                )}
+                              </View>
+
+                              <View style={{ flex: 1, alignItems: 'flex-end', justifyContent: 'center' }}>
+                                <View
+                                  style={[
+                                    styles.billGameBadge,
+                                    item.game_color ? { backgroundColor: item.game_color } : {},
+                                  ]}
+                                >
+                                  <Text style={styles.billGameBadgeText}>{billGame}</Text>
+                                </View>
+                                <View
+                                  style={[
+                                    styles.statusBadgeSmall,
+                                    isCancelled ? styles.statusBadgeCancelled : styles.statusBadgeActive,
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.statusBadgeSmallText,
+                                      isCancelled ? { color: '#DC2626' } : { color: '#059669' },
+                                    ]}
+                                  >
+                                    {item.status}
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+
+                            {/* Customer Row */}
+                            {item.customer_name ? (
+                              <View style={styles.billCustomerRow}>
+                                <Text style={styles.billCustomerLabel}>Customer: </Text>
+                                <Text style={styles.billCustomerName}>{item.customer_name}</Text>
+                              </View>
+                            ) : null}
+
+                            {/* Entries Table */}
+                            <View style={styles.billTableHead}>
+                              <Text style={[styles.billColHead, { flex: 1.2 }]}>Category</Text>
+                              <Text style={[styles.billColHead, { flex: 1 }]}>Number</Text>
+                              <Text style={[styles.billColHead, { flex: 0.8, textAlign: 'center' }]}>Count</Text>
+                              <Text style={[styles.billColHead, { flex: 1, textAlign: 'right' }]}>Total (₹)</Text>
+                            </View>
+
+                            {sortedEntries.map((entry: any, eIdx: number) => {
+                              const entryCategory = formatEntryCategory(entry, item);
+                              const entryPriceStr = parseFloat(entry.total_price || 0).toFixed(2);
+                              return (
+                                <View key={entry.id || eIdx} style={styles.billTableRow}>
+                                  <Text style={[styles.billColCell, { flex: 1.2 }]}>{entryCategory}</Text>
+                                  <Text style={[styles.billColCell, styles.billCellBold, { flex: 1 }]}>{entry.number}</Text>
+                                  <Text style={[styles.billColCell, { flex: 0.8, textAlign: 'center' }]}>{entry.quantity}</Text>
+                                  <Text style={[styles.billColCell, styles.billCellBold, { flex: 1, textAlign: 'right' }]}>
+                                    {entryPriceStr}
+                                  </Text>
+                                </View>
+                              );
+                            })}
+
+                            {/* Card Footer: Totals and Actions */}
+                            <View style={styles.ticketHistoryFooter}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.billFooterMeta}>
+                                  Total Count: <Text style={styles.billCellBold}>{item.total_quantity}</Text>
+                                </Text>
+                                <Text style={styles.billFooterTotal}>
+                                  Total: ₹{totalPriceStr}
+                                </Text>
+                              </View>
+
+                              {/* Admin Actions: Edit & Cancel */}
+                              {canModify && (
+                                <View style={styles.ticketHistoryActionRow}>
+                                  <TouchableOpacity
+                                    style={styles.historyEditBtn}
+                                    activeOpacity={0.8}
+                                    onPress={async () => {
+                                      try {
+                                        const pRes = await api.getUserPrices(item.user_id);
+                                        setUserPrices(pRes.prices || []);
+                                      } catch {}
+                                      setEditingTicket(item);
+                                    }}
+                                  >
+                                    <Edit3 size={13} color="#FFFFFF" />
+                                    <Text style={styles.historyActionBtnText}>Edit</Text>
+                                  </TouchableOpacity>
+
+                                  <TouchableOpacity
+                                    style={styles.historyCancelBtn}
+                                    activeOpacity={0.8}
+                                    disabled={cancellingTicketNum === item.ticket_number}
+                                    onPress={() => handleCancelHistoryTicket(item)}
+                                  >
+                                    {cancellingTicketNum === item.ticket_number ? (
+                                      <ActivityIndicator size="small" color="#FFFFFF" />
+                                    ) : (
+                                      <>
+                                        <Trash2 size={13} color="#FFFFFF" />
+                                        <Text style={styles.historyActionBtnText}>Cancel</Text>
+                                      </>
+                                    )}
+                                  </TouchableOpacity>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })
                   )}
                 </View>
               )}
@@ -725,8 +1146,58 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
         >
           <View style={styles.pickerModal}>
             <Text style={styles.pickerTitle}>
-              Select {pickerType === 'ticket' ? 'Game / Ticket' : pickerType === 'mode' ? 'Mode' : 'Group'}
+              Select {pickerType === 'ticket' ? 'Game / Ticket' : pickerType === 'mode' ? 'Mode' : pickerType === 'group' ? 'Group' : pickerType === 'user' ? 'User Under Admin' : 'Status'}
             </Text>
+
+            {pickerType === 'user' && (
+              <ScrollView style={{ maxHeight: 280 }}>
+                <TouchableOpacity
+                  style={styles.pickerOption}
+                  onPress={() => {
+                    setTargetUserId('ALL');
+                    setPickerType(null);
+                  }}
+                >
+                  <Text style={styles.pickerOptionText}>ALL (All Users)</Text>
+                  {targetUserId === 'ALL' && <Check size={16} color={colors.emerald} />}
+                </TouchableOpacity>
+                {users.map((u) => (
+                  <TouchableOpacity
+                    key={u.id}
+                    style={styles.pickerOption}
+                    onPress={() => {
+                      setTargetUserId(u.id);
+                      setPickerType(null);
+                    }}
+                  >
+                    <Text style={styles.pickerOptionText}>{u.username}</Text>
+                    {targetUserId === u.id && <Check size={16} color={colors.emerald} />}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            {pickerType === 'status' && (
+              <ScrollView style={{ maxHeight: 200 }}>
+                {[
+                  { value: 'ALL', label: 'ALL Status' },
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'CANCELLED', label: 'Cancelled' },
+                ].map((item) => (
+                  <TouchableOpacity
+                    key={item.value}
+                    style={styles.pickerOption}
+                    onPress={() => {
+                      setSelectedStatus(item.value);
+                      setPickerType(null);
+                    }}
+                  >
+                    <Text style={styles.pickerOptionText}>{item.label}</Text>
+                    {selectedStatus === item.value && <Check size={16} color={colors.emerald} />}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
 
             {pickerType === 'ticket' && (
               <ScrollView style={{ maxHeight: 250 }}>
@@ -786,6 +1257,19 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack }) => {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Edit Ticket Modal for Ticket History */}
+      <EditTicketModal
+        visible={!!editingTicket}
+        ticket={editingTicket}
+        userPrices={userPrices}
+        onClose={() => setEditingTicket(null)}
+        onSuccess={(updatedTicket) => {
+          setEditingTicket(null);
+          Alert.alert('Ticket Updated', `Ticket #${updatedTicket.ticket_number} updated successfully.`);
+          fetchReport();
+        }}
+      />
     </View>
   );
 };
@@ -1290,6 +1774,149 @@ const styles = StyleSheet.create({
   netPayBottomVal: {
     fontSize: 16,
     fontWeight: '800',
+  },
+  // DAILY NET PAY TALLY CARD STYLES
+  netPayTallyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 14,
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 4 },
+      android: { elevation: 2 },
+      web: { boxShadow: '0 2px 4px rgba(0,0,0,0.06)' },
+    }),
+  },
+  netPayTallyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  netPayTallyTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  netPayTallySubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  netPayBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  netPayBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  netPayGridItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 6,
+    marginHorizontal: 3,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  netPayGridItemHighlight: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#CBD5E1',
+    borderWidth: 1.5,
+  },
+  netPayGridLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#64748B',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  netPayGridValue: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  // TICKET HISTORY STYLES
+  filterMetaPill: {
+    marginHorizontal: 12,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 6,
+  },
+  filterMetaText: {
+    fontSize: 11,
+    color: '#334155',
+    fontWeight: '600',
+  },
+  ticketHistorySeller: {
+    fontSize: 11,
+    color: '#E2E8F0',
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  statusBadgeSmall: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 4,
+  },
+  statusBadgeSmallText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  ticketHistoryFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  ticketHistoryActionRow: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+  },
+  historyEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  historyCancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  historyActionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   // MODAL STYLES
   modalBackdrop: {

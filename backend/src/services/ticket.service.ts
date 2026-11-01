@@ -801,8 +801,10 @@ export class TicketService {
 
   /**
    * Query list of tickets:
-   * - Admin can view tickets for all users or filter by user
+   * - Admin can view tickets for all users or filter by specific user
    * - Regular user can only view their own user-specific tickets
+   * - Supports filters by date range (fromDate, toDate), game, mode, group, status, and ticketNumber
+   * - Returns { tickets, summary } for rich analytics and ticket history
    */
   static async getTickets(
     orgId: string,
@@ -812,6 +814,11 @@ export class TicketService {
       gameId?: string;
       drawId?: string;
       date?: string;
+      fromDate?: string;
+      toDate?: string;
+      ticketNumber?: string;
+      group?: string;
+      mode?: string;
       status?: string;
       search?: string;
       limit?: number;
@@ -826,7 +833,7 @@ export class TicketService {
       // Normal users can only see their own tickets
       params.push(userId);
       whereClause += ` AND t.user_id = $${params.length}`;
-    } else if (filters.targetUserId && filters.targetUserId !== 'ALL') {
+    } else if (filters.targetUserId && filters.targetUserId !== 'ALL' && filters.targetUserId !== 'undefined') {
       // Admin filtering by target user
       params.push(filters.targetUserId);
       whereClause += ` AND t.user_id = $${params.length}`;
@@ -842,9 +849,32 @@ export class TicketService {
       whereClause += ` AND d.id = $${params.length}`;
     }
 
-    if (filters.date && filters.date !== 'undefined') {
-      params.push(filters.date);
-      whereClause += ` AND d.draw_date = $${params.length}`;
+    const effectiveFrom = filters.fromDate || (!filters.toDate ? filters.date : undefined);
+    const effectiveTo = filters.toDate || (!filters.fromDate ? filters.date : undefined);
+
+    if (effectiveFrom && effectiveFrom !== 'undefined') {
+      params.push(effectiveFrom);
+      whereClause += ` AND d.draw_date >= $${params.length}`;
+    }
+
+    if (effectiveTo && effectiveTo !== 'undefined') {
+      params.push(effectiveTo);
+      whereClause += ` AND d.draw_date <= $${params.length}`;
+    }
+
+    if (filters.ticketNumber && filters.ticketNumber.trim()) {
+      params.push(`%${filters.ticketNumber.trim()}%`);
+      whereClause += ` AND t.ticket_number ILIKE $${params.length}`;
+    }
+
+    if (filters.group && ['1', '2', '3'].includes(filters.group)) {
+      params.push(parseInt(filters.group, 10));
+      whereClause += ` AND EXISTS (SELECT 1 FROM ticket_entries te_grp WHERE te_grp.ticket_id = t.id AND LENGTH(te_grp.number) = $${params.length})`;
+    }
+
+    if (filters.mode && filters.mode !== 'ALL' && filters.mode !== 'undefined') {
+      params.push(filters.mode.trim());
+      whereClause += ` AND EXISTS (SELECT 1 FROM ticket_entries te_m WHERE te_m.ticket_id = t.id AND te_m.mode = $${params.length})`;
     }
 
     if (filters.status && filters.status !== 'ALL' && filters.status !== 'undefined') {
@@ -857,7 +887,7 @@ export class TicketService {
       whereClause += ` AND (t.ticket_number ILIKE $${params.length} OR t.customer_name ILIKE $${params.length})`;
     }
 
-    const limit = Math.min(filters.limit ? parseInt(String(filters.limit), 10) : 50, 100);
+    const limit = Math.min(filters.limit ? parseInt(String(filters.limit), 10) : 100, 500);
     const offset = filters.offset ? parseInt(String(filters.offset), 10) : 0;
 
     const sql = `
@@ -889,13 +919,37 @@ export class TicketService {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const res = await pool.query(sql, params);
-    return res.rows.map((r) => ({
+    const summarySql = `
+      SELECT COUNT(DISTINCT t.id) AS total_bills,
+             COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
+             COALESCE(SUM(t.total_amount), 0) AS total_sales
+      FROM tickets t
+      JOIN draws d ON d.id = t.draw_id
+      JOIN games g ON g.id = d.game_id
+      JOIN users u ON u.id = t.user_id
+      ${whereClause}
+    `;
+
+    const [ticketsRes, summaryRes] = await Promise.all([
+      pool.query(sql, params),
+      pool.query(summarySql, params),
+    ]);
+
+    const formattedTickets = ticketsRes.rows.map((r) => ({
       ...r,
       entries: r.entries || [],
       isCutoffPassed: r.edit_cutoff_time
         ? new Date().getTime() >= new Date(r.edit_cutoff_time).getTime()
         : false,
     }));
+
+    return {
+      tickets: formattedTickets,
+      summary: summaryRes.rows[0] || {
+        total_bills: 0,
+        total_quantity: 0,
+        total_sales: 0,
+      },
+    };
   }
 }

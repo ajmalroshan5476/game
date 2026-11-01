@@ -106,13 +106,18 @@ export const api = {
     gameId?: string;
     drawId?: string;
     date?: string;
+    fromDate?: string;
+    toDate?: string;
+    ticketNumber?: string;
+    group?: string;
+    mode?: string;
     status?: string;
     search?: string;
     limit?: number;
     offset?: number;
   }) => {
     const qs = params ? new URLSearchParams(params as any).toString() : '';
-    return request<{ tickets: any[] }>(`/api/tickets${qs ? `?${qs}` : ''}`);
+    return request<{ tickets: any[]; summary?: any }>(`/api/tickets${qs ? `?${qs}` : ''}`);
   },
   getTicket: (ticketNumber: string) => request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`),
   editTicket: (
@@ -200,7 +205,7 @@ export const api = {
   },
   getNetPayReport: (params?: any) => {
     const qs = new URLSearchParams(params).toString();
-    return request<any[]>(`/api/reports/net-pay${qs ? `?${qs}` : ''}`);
+    return request<any>(`/api/reports/net-pay${qs ? `?${qs}` : ''}`);
   },
 
   // Admin Users

@@ -26,6 +26,7 @@ type Screen =
   | 'home'
   | 'add-ticket'
   | 'reports'
+  | 'ticket-history'
   | 'results'
   | 'result-checking'
   | 'edit-delete'
@@ -57,6 +58,8 @@ function MainNavigator() {
       return <ResultsScreen onBack={() => setCurrentScreen('home')} initialTab="checking" />;
     case 'reports':
       return <ReportsScreen onBack={() => setCurrentScreen('home')} />;
+    case 'ticket-history':
+      return <ReportsScreen onBack={() => setCurrentScreen('home')} initialTab="ticket-history" />;
     case 'manage-sales':
       return (
         <ManageSalesScreen

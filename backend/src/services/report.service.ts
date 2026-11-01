@@ -385,6 +385,7 @@ export class ReportService {
 
   /**
    * 5. Net Pay Report
+   * Returns individual game breakdowns AND an aggregated daily/range tally across all games.
    */
   static async getNetPayReport(
     orgId: string,
@@ -393,6 +394,8 @@ export class ReportService {
       gameId?: string;
       fromDate?: string;
       toDate?: string;
+      date?: string;
+      targetUserId?: string;
       group?: string;
       mode?: string;
     }
@@ -400,16 +403,20 @@ export class ReportService {
     let dateFilter = '';
     const params: any[] = [orgId];
 
-    if (filters?.fromDate && filters.fromDate !== 'undefined') {
-      params.push(filters.fromDate);
+    const effectiveFrom = filters?.fromDate || (!filters?.toDate ? filters?.date : undefined);
+    const effectiveTo = filters?.toDate || (!filters?.fromDate ? filters?.date : undefined);
+
+    if (effectiveFrom && effectiveFrom !== 'undefined') {
+      params.push(effectiveFrom);
       dateFilter += ` AND fl.created_at >= $${params.length}`;
     }
-    if (filters?.toDate && filters.toDate !== 'undefined') {
-      params.push(`${filters.toDate} 23:59:59.999Z`);
+    if (effectiveTo && effectiveTo !== 'undefined') {
+      params.push(`${effectiveTo} 23:59:59.999Z`);
       dateFilter += ` AND fl.created_at <= $${params.length}`;
     }
-    if (userId) {
-      params.push(userId);
+    const effectiveUserId = filters?.targetUserId || userId;
+    if (effectiveUserId && effectiveUserId !== 'ALL' && effectiveUserId !== 'undefined') {
+      params.push(effectiveUserId);
       dateFilter += ` AND fl.user_id = $${params.length}`;
     }
     if (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
@@ -433,18 +440,38 @@ export class ReportService {
 
     const res = await query(sql, params);
 
-    return res.rows.map((row) => {
+    const items = res.rows.map((row) => {
       const sales = Math.max(0, parseFloat(row.total_sales));
       const prize = parseFloat(row.total_prizes);
       const commission = parseFloat(row.total_commission);
       const netPay = prize + commission - sales;
       return {
         gameName: row.game_name,
-        totalSales: sales,
-        totalPrizes: prize,
-        totalCommission: commission,
+        totalSales: Math.round(sales * 100) / 100,
+        totalPrizes: Math.round(prize * 100) / 100,
+        totalCommission: Math.round(commission * 100) / 100,
         netPay: Math.round(netPay * 100) / 100,
       };
     });
+
+    const summary = items.reduce(
+      (acc, item) => {
+        acc.totalSales += item.totalSales;
+        acc.totalPrizes += item.totalPrizes;
+        acc.totalCommission += item.totalCommission;
+        acc.netPay += item.netPay;
+        return acc;
+      },
+      { gameName: 'TOTAL / ALL GAMES', totalSales: 0, totalPrizes: 0, totalCommission: 0, netPay: 0 }
+    );
+    summary.totalSales = Math.round(summary.totalSales * 100) / 100;
+    summary.totalPrizes = Math.round(summary.totalPrizes * 100) / 100;
+    summary.totalCommission = Math.round(summary.totalCommission * 100) / 100;
+    summary.netPay = Math.round(summary.netPay * 100) / 100;
+
+    return {
+      items,
+      summary,
+    };
   }
 }

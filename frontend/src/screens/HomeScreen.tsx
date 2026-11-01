@@ -14,6 +14,7 @@ import {
   LogOut,
   Sparkles,
   CheckCircle2,
+  Receipt,
 } from 'lucide-react-native';
 
 interface HomeScreenProps {
@@ -102,6 +103,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
           {/* 7. Admin Controls */}
           {user?.role === 'ADMIN' && (
             <>
+              <MenuCard
+                title="Ticket History"
+                subtitle="All user tickets & bills"
+                IconComponent={Receipt}
+                onPress={() => onNavigate('ticket-history')}
+                cardColor="#7C3AED" // Distinct purple for admin ticket history
+              />
+
               <MenuCard
                 title="Result Checking"
                 subtitle="Verify user winners"
