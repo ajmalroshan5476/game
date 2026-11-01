@@ -408,19 +408,20 @@ export class TicketService {
    * Cancel / delete a ticket and atomically release capacity & record ledger reversal
    */
   static async cancelTicket(orgId: string, userId: string, ticketNumber: string, isAdmin = false) {
+    const cleanNum = ticketNumber.trim();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // 1. Fetch ticket and draw
+      // 1. Fetch ticket and draw (lock only tickets table to avoid deadlocks)
       const ticketRes = await client.query(
         `SELECT t.id, t.ticket_number, t.org_id, t.user_id, t.draw_id, t.total_amount, t.status,
-                d.edit_cutoff_time, d.cutoff_time
+                d.edit_cutoff_time, d.cutoff_time, d.status AS draw_status
          FROM tickets t
          JOIN draws d ON d.id = t.draw_id
-         WHERE t.ticket_number = $1 AND t.org_id = $2
-         FOR UPDATE`,
-        [ticketNumber.trim(), orgId]
+         WHERE LOWER(TRIM(t.ticket_number)) = LOWER($1) AND t.org_id = $2
+         FOR UPDATE OF t`,
+        [cleanNum, orgId]
       );
 
       if (ticketRes.rows.length === 0) {
@@ -429,7 +430,7 @@ export class TicketService {
 
       const ticket = ticketRes.rows[0];
 
-      // Authorization check
+      // Authorization check: Regular users can only cancel their own tickets
       if (!isAdmin && ticket.user_id !== userId) {
         throw new Error('Unauthorized to cancel this ticket');
       }
@@ -438,7 +439,11 @@ export class TicketService {
         throw new Error('Ticket is already cancelled');
       }
 
-      // Cutoff check
+      if (ticket.draw_status === 'RESULTED') {
+        throw new Error('Cannot cancel ticket: Draw results have already been declared');
+      }
+
+      // Cutoff check: Regular users must cancel before edit_cutoff_time
       const now = new Date();
       const editCutoff = new Date(ticket.edit_cutoff_time || ticket.cutoff_time);
       if (now.getTime() >= editCutoff.getTime() && !isAdmin) {
@@ -459,13 +464,17 @@ export class TicketService {
         [ticket.id]
       );
 
-      // 4. Release capacity counters
+      // 4. Release capacity counters (aggregated by distinct number)
+      const qtyByNumber = new Map<string, number>();
       for (const entry of entriesRes.rows) {
+        qtyByNumber.set(entry.number, (qtyByNumber.get(entry.number) || 0) + parseInt(entry.quantity, 10));
+      }
+      for (const [num, qty] of qtyByNumber.entries()) {
         await client.query(
           `UPDATE number_limit_counters
            SET accepted_quantity = GREATEST(0, accepted_quantity - $1)
            WHERE org_id = $2 AND draw_id = $3 AND number = $4`,
-          [entry.quantity, orgId, ticket.draw_id, entry.number]
+          [qty, orgId, ticket.draw_id, num]
         );
       }
 
@@ -489,20 +498,278 @@ export class TicketService {
   }
 
   /**
+   * Edit an existing ticket within time limit: atomically releases previous capacity,
+   * validates new entries against caps & rules, updates entries & totals, and syncs financial ledger.
+   */
+  static async editTicket(
+    orgId: string,
+    userId: string,
+    ticketNumber: string,
+    payload: { customerName?: string; entries: EntryInput[] },
+    isAdmin = false
+  ) {
+    const cleanNum = ticketNumber.trim();
+    if (!Array.isArray(payload.entries) || payload.entries.length === 0) {
+      throw new Error('At least one ticket entry is required');
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Fetch ticket and draw with lock
+      const ticketRes = await client.query(
+        `SELECT t.id, t.ticket_number, t.org_id, t.user_id, t.draw_id, t.customer_name,
+                t.total_quantity, t.total_amount, t.status,
+                d.game_id, d.draw_date, d.draw_time, d.cutoff_time, d.edit_cutoff_time,
+                d.status AS draw_status,
+                g.name AS game_name, g.color AS game_color
+         FROM tickets t
+         JOIN draws d ON d.id = t.draw_id
+         JOIN games g ON g.id = d.game_id
+         WHERE LOWER(TRIM(t.ticket_number)) = LOWER($1) AND t.org_id = $2
+         FOR UPDATE OF t`,
+        [cleanNum, orgId]
+      );
+
+      if (ticketRes.rows.length === 0) {
+        throw new Error('Ticket not found');
+      }
+
+      const ticket = ticketRes.rows[0];
+
+      // Authorization check: Regular users can only edit their own tickets
+      if (!isAdmin && ticket.user_id !== userId) {
+        throw new Error('Unauthorized to edit this ticket');
+      }
+
+      if (ticket.status !== 'ACTIVE') {
+        throw new Error(`Cannot edit ticket: Ticket status is ${ticket.status.toLowerCase()}`);
+      }
+
+      if (ticket.draw_status === 'RESULTED') {
+        throw new Error('Cannot edit ticket: Draw results have already been declared');
+      }
+
+      // Cutoff check: Regular users must edit before edit_cutoff_time
+      const now = new Date();
+      const editCutoff = new Date(ticket.edit_cutoff_time || ticket.cutoff_time);
+      if (now.getTime() >= editCutoff.getTime() && !isAdmin) {
+        throw new Error(
+          `Cannot edit ticket: Edit/Delete cutoff time (${editCutoff.toLocaleTimeString('en-IN')}) has passed`
+        );
+      }
+
+      // 2. Fetch existing ticket entries
+      const oldEntriesRes = await client.query(
+        `SELECT number, quantity FROM ticket_entries WHERE ticket_id = $1`,
+        [ticket.id]
+      );
+
+      // 3. Atomically release previous capacity counters inside this transaction
+      const oldQtyByNumber = new Map<string, number>();
+      for (const row of oldEntriesRes.rows) {
+        oldQtyByNumber.set(row.number, (oldQtyByNumber.get(row.number) || 0) + parseInt(row.quantity, 10));
+      }
+      for (const [num, qty] of oldQtyByNumber.entries()) {
+        await client.query(
+          `UPDATE number_limit_counters
+           SET accepted_quantity = GREATEST(0, accepted_quantity - $1)
+           WHERE org_id = $2 AND draw_id = $3 AND number = $4`,
+          [qty, orgId, ticket.draw_id, num]
+        );
+      }
+
+      // 4. Calculate prices for the new entries using the ticket owner's pricing
+      const schemeRes = await client.query(
+        `SELECT unit_rate FROM prize_schemes WHERE org_id = $1 AND is_active = TRUE LIMIT 1`,
+        [orgId]
+      );
+      const unitRate = schemeRes.rows.length > 0 ? parseFloat(schemeRes.rows[0].unit_rate) : 10.0;
+      const userPriceMap = await PricingService.getEffectivePriceMap(orgId, ticket.user_id, ticket.game_id);
+
+      const expandedEntries = this.expandEntries(payload.entries, unitRate, userPriceMap);
+
+      // 5. Aggregate requested quantities per number
+      const requestedByNumber = new Map<string, number>();
+      let totalQty = 0;
+      let totalAmount = 0;
+
+      for (const item of expandedEntries) {
+        totalQty += item.quantity;
+        totalAmount += item.totalPrice;
+        const curr = requestedByNumber.get(item.number) || 0;
+        requestedByNumber.set(item.number, curr + item.quantity);
+      }
+
+      const sortedNumbers = Array.from(requestedByNumber.keys()).sort();
+
+      // 6. Ensure counter records exist
+      for (const num of sortedNumbers) {
+        await client.query(
+          `INSERT INTO number_limit_counters (org_id, draw_id, number, accepted_quantity)
+           VALUES ($1, $2, $3, 0)
+           ON CONFLICT (org_id, draw_id, number) DO NOTHING`,
+          [orgId, ticket.draw_id, num]
+        );
+      }
+
+      // 7. Lock counter rows for update
+      const counterRows = await client.query(
+        `SELECT number, accepted_quantity
+         FROM number_limit_counters
+         WHERE org_id = $1 AND draw_id = $2 AND number = ANY($3)
+         FOR UPDATE`,
+        [orgId, ticket.draw_id, sortedNumbers]
+      );
+
+      const acceptedMap = new Map<string, number>();
+      for (const row of counterRows.rows) {
+        acceptedMap.set(row.number, parseInt(row.accepted_quantity, 10));
+      }
+
+      // 8. Query configured draw limits
+      const limitRows = await client.query(
+        `SELECT number, max_quantity
+         FROM number_limits
+         WHERE org_id = $1 AND draw_id = $2 AND number = ANY($3)`,
+        [orgId, ticket.draw_id, sortedNumbers]
+      );
+
+      const maxLimitMap = new Map<string, number>();
+      for (const row of limitRows.rows) {
+        maxLimitMap.set(row.number, parseInt(row.max_quantity, 10));
+      }
+
+      // 8b. Query Universal Game Range Limits
+      const rangeLimitsRes = await client.query(
+        `SELECT digit_type, start_range, end_range, max_cap
+         FROM game_range_limits
+         WHERE org_id = $1 AND game_id = $2`,
+        [orgId, ticket.game_id]
+      );
+
+      for (const num of sortedNumbers) {
+        const numVal = parseInt(num, 10);
+        for (const rl of rangeLimitsRes.rows) {
+          if (num.length === parseInt(rl.digit_type, 10)) {
+            const startVal = parseInt(rl.start_range, 10);
+            const endVal = parseInt(rl.end_range, 10);
+            if (numVal >= startVal && numVal <= endVal) {
+              const cap = parseInt(rl.max_cap, 10);
+              if (cap === 0) {
+                throw new Error(`Ticket rejected: Number ${num} is currently blocked for this game`);
+              }
+              const currentCap = maxLimitMap.get(num);
+              maxLimitMap.set(num, currentCap !== undefined ? Math.min(currentCap, cap) : cap);
+            }
+          }
+        }
+      }
+
+      // 9. Enforce limits on new entries
+      for (const num of sortedNumbers) {
+        const maxLimit = maxLimitMap.get(num);
+        if (maxLimit !== undefined) {
+          const currentlyAccepted = acceptedMap.get(num) || 0;
+          const requested = requestedByNumber.get(num) || 0;
+          const remaining = Math.max(0, maxLimit - currentlyAccepted);
+
+          if (currentlyAccepted + requested > maxLimit) {
+            throw new LimitExceededError({
+              number: num,
+              maxQuantity: maxLimit,
+              currentlyAccepted,
+              requested,
+              remaining,
+            });
+          }
+        }
+      }
+
+      // 10. Update counters with new quantities
+      for (const [num, reqQty] of requestedByNumber.entries()) {
+        await client.query(
+          `UPDATE number_limit_counters
+           SET accepted_quantity = accepted_quantity + $1
+           WHERE org_id = $2 AND draw_id = $3 AND number = $4`,
+          [reqQty, orgId, ticket.draw_id, num]
+        );
+      }
+
+      // 11. Update ticket header
+      const newCustName = payload.customerName !== undefined ? payload.customerName.trim() || null : ticket.customer_name;
+      const updatedTicketRes = await client.query(
+        `UPDATE tickets
+         SET customer_name = $1, total_quantity = $2, total_amount = $3, updated_at = NOW()
+         WHERE id = $4
+         RETURNING id, ticket_number, customer_name, total_quantity, total_amount, status, updated_at`,
+        [newCustName, totalQty, totalAmount, ticket.id]
+      );
+      const updatedTicket = updatedTicketRes.rows[0];
+
+      // 12. Delete old ticket entries and insert new entries
+      await client.query(`DELETE FROM ticket_entries WHERE ticket_id = $1`, [ticket.id]);
+
+      for (const entry of expandedEntries) {
+        await client.query(
+          `INSERT INTO ticket_entries (
+             ticket_id, number, quantity, mode, is_box, unit_price, total_price
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            ticket.id,
+            entry.number,
+            entry.quantity,
+            entry.mode,
+            entry.isBox,
+            entry.unitPrice,
+            entry.totalPrice,
+          ]
+        );
+      }
+
+      // 13. Sync financial ledger for the sale
+      await client.query(
+        `UPDATE financial_ledger
+         SET amount = $1, notes = 'Ticket purchase (edited)'
+         WHERE org_id = $2 AND ticket_id = $3 AND entry_type = 'TICKET_SALE'`,
+        [totalAmount, orgId, ticket.id]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        ...updatedTicket,
+        drawName: ticket.game_name,
+        drawTime: ticket.draw_time,
+        gameColor: ticket.game_color,
+        entries: expandedEntries,
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Search ticket by ticket number
    */
   static async getTicketByNumber(orgId: string, userId: string, ticketNumber: string, isAdmin = false) {
     const res = await pool.query(
       `SELECT t.id, t.ticket_number, t.customer_name, t.total_quantity, t.total_amount,
-              t.status, t.created_at, t.user_id,
-              d.draw_date, d.draw_time, d.cutoff_time, d.edit_cutoff_time,
-              g.name AS game_name, g.color AS game_color,
+              t.status, t.created_at, t.updated_at, t.user_id,
+              d.id AS draw_id, d.draw_date, d.draw_time, d.cutoff_time, d.edit_cutoff_time,
+              d.status AS draw_status,
+              g.id AS game_id, g.name AS game_name, g.code AS game_code, g.color AS game_color,
               u.username AS seller_username
        FROM tickets t
        JOIN draws d ON d.id = t.draw_id
        JOIN games g ON g.id = d.game_id
        JOIN users u ON u.id = t.user_id
-       WHERE t.ticket_number = $1 AND t.org_id = $2`,
+       WHERE LOWER(TRIM(t.ticket_number)) = LOWER(TRIM($1)) AND t.org_id = $2`,
       [ticketNumber.trim(), orgId]
     );
 
@@ -521,9 +788,114 @@ export class TicketService {
       [ticket.id]
     );
 
+    const isCutoffPassed = ticket.edit_cutoff_time
+      ? new Date().getTime() >= new Date(ticket.edit_cutoff_time).getTime()
+      : false;
+
     return {
       ...ticket,
       entries: entriesRes.rows,
+      isCutoffPassed,
     };
+  }
+
+  /**
+   * Query list of tickets:
+   * - Admin can view tickets for all users or filter by user
+   * - Regular user can only view their own user-specific tickets
+   */
+  static async getTickets(
+    orgId: string,
+    userId: string,
+    filters: {
+      targetUserId?: string;
+      gameId?: string;
+      drawId?: string;
+      date?: string;
+      status?: string;
+      search?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+    isAdmin = false
+  ) {
+    let whereClause = `WHERE t.org_id = $1`;
+    const params: any[] = [orgId];
+
+    if (!isAdmin) {
+      // Normal users can only see their own tickets
+      params.push(userId);
+      whereClause += ` AND t.user_id = $${params.length}`;
+    } else if (filters.targetUserId && filters.targetUserId !== 'ALL') {
+      // Admin filtering by target user
+      params.push(filters.targetUserId);
+      whereClause += ` AND t.user_id = $${params.length}`;
+    }
+
+    if (filters.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
+      params.push(filters.gameId);
+      whereClause += ` AND (g.id::text = $${params.length} OR g.code ILIKE $${params.length} OR g.name ILIKE $${params.length})`;
+    }
+
+    if (filters.drawId && filters.drawId !== 'ALL' && filters.drawId !== 'undefined') {
+      params.push(filters.drawId);
+      whereClause += ` AND d.id = $${params.length}`;
+    }
+
+    if (filters.date && filters.date !== 'undefined') {
+      params.push(filters.date);
+      whereClause += ` AND d.draw_date = $${params.length}`;
+    }
+
+    if (filters.status && filters.status !== 'ALL' && filters.status !== 'undefined') {
+      params.push(filters.status.toUpperCase());
+      whereClause += ` AND t.status = $${params.length}`;
+    }
+
+    if (filters.search && filters.search.trim()) {
+      params.push(`%${filters.search.trim()}%`);
+      whereClause += ` AND (t.ticket_number ILIKE $${params.length} OR t.customer_name ILIKE $${params.length})`;
+    }
+
+    const limit = Math.min(filters.limit ? parseInt(String(filters.limit), 10) : 50, 100);
+    const offset = filters.offset ? parseInt(String(filters.offset), 10) : 0;
+
+    const sql = `
+      SELECT t.id, t.ticket_number, t.customer_name, t.total_quantity, t.total_amount,
+             t.status, t.created_at, t.updated_at, t.user_id,
+             u.username AS seller_username,
+             d.id AS draw_id, d.draw_date, d.draw_time, d.cutoff_time, d.edit_cutoff_time,
+             d.status AS draw_status,
+             g.id AS game_id, g.name AS game_name, g.code AS game_code, g.color AS game_color,
+             (
+               SELECT json_agg(json_build_object(
+                 'id', te.id,
+                 'number', te.number,
+                 'quantity', te.quantity,
+                 'mode', te.mode,
+                 'is_box', te.is_box,
+                 'unit_price', te.unit_price,
+                 'total_price', te.total_price
+               ) ORDER BY te.created_at ASC)
+               FROM ticket_entries te
+               WHERE te.ticket_id = t.id
+             ) AS entries
+      FROM tickets t
+      JOIN draws d ON d.id = t.draw_id
+      JOIN games g ON g.id = d.game_id
+      JOIN users u ON u.id = t.user_id
+      ${whereClause}
+      ORDER BY t.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const res = await pool.query(sql, params);
+    return res.rows.map((r) => ({
+      ...r,
+      entries: r.entries || [],
+      isCutoffPassed: r.edit_cutoff_time
+        ? new Date().getTime() >= new Date(r.edit_cutoff_time).getTime()
+        : false,
+    }));
   }
 }

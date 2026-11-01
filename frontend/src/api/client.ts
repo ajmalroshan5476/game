@@ -101,9 +101,38 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  getTickets: (params?: {
+    targetUserId?: string;
+    gameId?: string;
+    drawId?: string;
+    date?: string;
+    status?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const qs = params ? new URLSearchParams(params as any).toString() : '';
+    return request<{ tickets: any[] }>(`/api/tickets${qs ? `?${qs}` : ''}`);
+  },
   getTicket: (ticketNumber: string) => request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`),
+  editTicket: (
+    ticketNumber: string,
+    payload: { customerName?: string; entries: any[] }
+  ) =>
+    request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   cancelTicket: (ticketNumber: string) =>
-    request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}/cancel`, { method: 'POST' }),
+    request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  deleteTicket: (ticketNumber: string) =>
+    request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({}),
+    }),
 
   // Limits
   getLimits: (drawId: string) => request<{ limits: any[] }>(`/api/limits?drawId=${drawId}`),

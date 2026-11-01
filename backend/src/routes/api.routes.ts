@@ -298,6 +298,23 @@ export async function apiRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.get('/api/tickets', { preHandler: authenticate }, async (req, reply) => {
+    const { orgId, userId, role } = req.user!;
+    const queryParams = req.query as any;
+
+    try {
+      const tickets = await TicketService.getTickets(
+        orgId,
+        userId,
+        queryParams,
+        role === 'ADMIN'
+      );
+      return { tickets };
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
   fastify.get('/api/tickets/:ticketNumber', { preHandler: authenticate }, async (req, reply) => {
     const { orgId, userId, role } = req.user!;
     const { ticketNumber } = req.params as any;
@@ -313,7 +330,53 @@ export async function apiRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.put('/api/tickets/:ticketNumber', { preHandler: authenticate }, async (req, reply) => {
+    const { orgId, userId, role } = req.user!;
+    const { ticketNumber } = req.params as any;
+    const payload = req.body as any;
+
+    if (!payload?.entries || !Array.isArray(payload.entries) || payload.entries.length === 0) {
+      return reply.status(400).send({ error: 'At least one ticket entry is required' });
+    }
+
+    try {
+      const result = await TicketService.editTicket(
+        orgId,
+        userId,
+        ticketNumber,
+        payload,
+        role === 'ADMIN'
+      );
+      return reply.status(200).send(result);
+    } catch (err: any) {
+      if (err instanceof LimitExceededError) {
+        return reply.status(409).send({
+          error: 'NUMBER_LIMIT_EXCEEDED',
+          message: err.message,
+          number: err.number,
+          maxQuantity: err.maxQuantity,
+          currentlyAccepted: err.currentlyAccepted,
+          requested: err.requested,
+          remaining: err.remaining,
+        });
+      }
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
   fastify.post('/api/tickets/:ticketNumber/cancel', { preHandler: authenticate }, async (req, reply) => {
+    const { orgId, userId, role } = req.user!;
+    const { ticketNumber } = req.params as any;
+
+    try {
+      const result = await TicketService.cancelTicket(orgId, userId, ticketNumber, role === 'ADMIN');
+      return result;
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  fastify.delete('/api/tickets/:ticketNumber', { preHandler: authenticate }, async (req, reply) => {
     const { orgId, userId, role } = req.user!;
     const { ticketNumber } = req.params as any;
 

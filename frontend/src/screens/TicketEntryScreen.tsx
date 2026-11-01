@@ -21,6 +21,7 @@ import {
   MessageCircle,
   Camera,
   Trash2,
+  Edit3,
   CheckCircle2,
   AlertTriangle,
   Receipt,
@@ -28,6 +29,7 @@ import {
   ArrowLeft,
   Clock,
 } from 'lucide-react-native';
+import { EditTicketModal } from '../components/EditTicketModal';
 
 interface TicketEntryScreenProps {
   onBack: () => void;
@@ -78,6 +80,10 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
   // Modals
   const [chooseTicketModalVisible, setChooseTicketModalVisible] = useState(false);
   const [confirmedTicket, setConfirmedTicket] = useState<any | null>(null);
+  const [lastEnteredTicket, setLastEnteredTicket] = useState<any | null>(null);
+  const [editingTicket, setEditingTicket] = useState<any | null>(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [cancellingLastTicket, setCancellingLastTicket] = useState(false);
 
   // Top Controls State
   const [digitGroup, setDigitGroup] = useState<DigitGroup>('3'); // '1', '2', or '3'
@@ -450,6 +456,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
 
       const result = await api.submitTicket(payload);
       setConfirmedTicket(result);
+      setLastEnteredTicket(result);
       setEntries([]);
       setCustomerName('');
       setStartRangeInput('');
@@ -472,6 +479,52 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleEditTicketFromEntry = (t: any) => {
+    if (!t) return;
+    if (t.status === 'CANCELLED') {
+      Alert.alert('Cannot Edit', 'This ticket has been cancelled.');
+      return;
+    }
+    setEditingTicket(t);
+    setEditModalVisible(true);
+    setConfirmedTicket(null);
+  };
+
+  const handleCancelTicketFromEntry = (t: any) => {
+    if (!t) return;
+    if (t.status === 'CANCELLED') {
+      Alert.alert('Notice', 'Ticket is already cancelled.');
+      return;
+    }
+
+    Alert.alert(
+      'Cancel / Delete Ticket',
+      `Are you sure you want to cancel Ticket #${t.ticket_number}? Number allocation will be released immediately.`,
+      [
+        { text: 'Keep Ticket', style: 'cancel' },
+        {
+          text: 'Yes, Delete Ticket',
+          style: 'destructive',
+          onPress: async () => {
+            setCancellingLastTicket(true);
+            try {
+              await api.cancelTicket(t.ticket_number);
+              Alert.alert('Deleted', `Ticket #${t.ticket_number} cancelled successfully.`);
+              setConfirmedTicket(null);
+              setLastEnteredTicket((prev: any) =>
+                prev ? { ...prev, status: 'CANCELLED' } : null
+              );
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to cancel ticket');
+            } finally {
+              setCancellingLastTicket(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Submit & Save Ticket from Header Save Button
@@ -875,6 +928,62 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
         <Text style={styles.subSummaryText}>Total Collect: {totalAmount}</Text>
       </View>
 
+      {/* LAST ENTERED TICKET QUICK EDIT/DELETE BAR */}
+      {lastEnteredTicket && (
+        <View style={styles.lastTicketBanner}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.lastTicketTitle}>
+                Last Ticket: #{lastEnteredTicket.ticket_number}
+              </Text>
+              <View
+                style={[
+                  styles.lastTicketStatusBadge,
+                  lastEnteredTicket.status === 'CANCELLED'
+                    ? styles.lastTicketStatusBadgeCancelled
+                    : styles.lastTicketStatusBadgeActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.lastTicketStatusText,
+                    lastEnteredTicket.status === 'CANCELLED'
+                      ? { color: '#DC2626' }
+                      : { color: '#059669' },
+                  ]}
+                >
+                  {lastEnteredTicket.status || 'ACTIVE'}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.lastTicketMeta}>
+              Qty: {lastEnteredTicket.total_quantity} • ₹{lastEnteredTicket.total_amount}
+            </Text>
+          </View>
+
+          {lastEnteredTicket.status !== 'CANCELLED' && (
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              <TouchableOpacity
+                style={styles.lastTicketEditBtn}
+                onPress={() => handleEditTicketFromEntry(lastEnteredTicket)}
+              >
+                <Edit3 size={13} color="#2563EB" />
+                <Text style={styles.lastTicketEditText}>Edit</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.lastTicketDeleteBtn}
+                onPress={() => handleCancelTicketFromEntry(lastEnteredTicket)}
+                disabled={cancellingLastTicket}
+              >
+                <Trash2 size={13} color="#DC2626" />
+                <Text style={styles.lastTicketDeleteText}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      )}
+
       {/* QUEUED TICKETS LIST */}
       <ScrollView contentContainerStyle={styles.entriesListContent} showsVerticalScrollIndicator={false}>
         {entries.length === 0 ? (
@@ -1060,6 +1169,28 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
               </View>
             )}
 
+            {/* Quick Actions on Confirmed Ticket within time limit: Edit & Delete */}
+            <View style={styles.receiptActionButtonsRow}>
+              <TouchableOpacity
+                style={styles.receiptEditBtn}
+                activeOpacity={0.85}
+                onPress={() => handleEditTicketFromEntry(confirmedTicket)}
+              >
+                <Edit3 size={15} color="#FFFFFF" />
+                <Text style={styles.receiptActionBtnText}>Edit Ticket</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.receiptDeleteBtn}
+                activeOpacity={0.85}
+                onPress={() => handleCancelTicketFromEntry(confirmedTicket)}
+                disabled={cancellingLastTicket}
+              >
+                <Trash2 size={15} color="#FFFFFF" />
+                <Text style={styles.receiptActionBtnText}>Delete Ticket</Text>
+              </TouchableOpacity>
+            </View>
+
             <TouchableOpacity
               style={styles.receiptDoneBtn}
               activeOpacity={0.85}
@@ -1070,6 +1201,20 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
           </View>
         </View>
       </Modal>
+
+      {/* 2b. EDIT TICKET MODAL */}
+      <EditTicketModal
+        visible={editModalVisible}
+        ticket={editingTicket}
+        onClose={() => {
+          setEditModalVisible(false);
+          setEditingTicket(null);
+        }}
+        onSuccess={(updated) => {
+          setLastEnteredTicket(updated);
+        }}
+        userPrices={userPrices}
+      />
 
       {/* 3. CAPACITY / LIMIT EXCEEDED ALERT */}
       <Modal visible={!!limitAlert} transparent animationType="fade">
@@ -1553,12 +1698,111 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 20,
+    marginTop: 10,
   },
   receiptDoneBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  receiptActionButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+    marginTop: 18,
+  },
+  receiptEditBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#2563EB',
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  receiptDeleteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#DC2626',
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  receiptActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  lastTicketBanner: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  lastTicketTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  lastTicketStatusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  lastTicketStatusBadgeActive: {
+    backgroundColor: '#ECFDF5',
+  },
+  lastTicketStatusBadgeCancelled: {
+    backgroundColor: '#FEF2F2',
+  },
+  lastTicketStatusText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  lastTicketMeta: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  lastTicketEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  lastTicketEditText: {
+    fontSize: 11,
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+  lastTicketDeleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  lastTicketDeleteText: {
+    fontSize: 11,
+    color: '#DC2626',
+    fontWeight: '700',
   },
   limitAlertBox: {
     backgroundColor: '#FFFFFF',

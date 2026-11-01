@@ -21,7 +21,11 @@ import {
   Check,
   Receipt,
   Home,
+  Edit3,
+  Trash2,
 } from 'lucide-react-native';
+import { useAuth } from '../context/AuthContext';
+import { EditTicketModal } from '../components/EditTicketModal';
 
 interface ManageSalesScreenProps {
   onBack: () => void;
@@ -32,9 +36,16 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
   onBack,
   onNavigateAddTicket,
 }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
   const [games, setGames] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [salesData, setSalesData] = useState<any>(null);
+  const [selectedTicketForEdit, setSelectedTicketForEdit] = useState<any | null>(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [userPrices, setUserPrices] = useState<any[]>([]);
+  const [cancellingTicketNum, setCancellingTicketNum] = useState<string | null>(null);
 
   // Filters (Replicated from Sales Report)
   const [selectedTicket, setSelectedTicket] = useState('ALL');
@@ -61,7 +72,76 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
       const gamesRes = await api.getGames();
       setGames(gamesRes.games || []);
     } catch {}
+    try {
+      const pRes = await api.getMyPrices();
+      setUserPrices(pRes.prices || []);
+    } catch {}
     await fetchSales();
+  };
+
+  const handleEditBill = (bill: any) => {
+    if (bill.status === 'CANCELLED') {
+      Alert.alert('Cannot Edit', 'This bill has been cancelled.');
+      return;
+    }
+
+    const isCutoffPassed = bill.edit_cutoff_time
+      ? new Date().getTime() >= new Date(bill.edit_cutoff_time).getTime()
+      : false;
+
+    if (!isAdmin && isCutoffPassed) {
+      Alert.alert(
+        'Cutoff Passed',
+        'Cannot edit ticket: Edit/Delete cutoff time has already passed for this draw.'
+      );
+      return;
+    }
+
+    setSelectedTicketForEdit(bill);
+    setEditModalVisible(true);
+  };
+
+  const handleDeleteBill = (bill: any) => {
+    if (bill.status === 'CANCELLED') {
+      Alert.alert('Notice', 'Ticket is already cancelled.');
+      return;
+    }
+
+    const isCutoffPassed = bill.edit_cutoff_time
+      ? new Date().getTime() >= new Date(bill.edit_cutoff_time).getTime()
+      : false;
+
+    if (!isAdmin && isCutoffPassed) {
+      Alert.alert(
+        'Cutoff Passed',
+        'Cannot delete ticket: Edit/Delete cutoff time has already passed for this draw.'
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Cancel / Delete Bill',
+      `Are you sure you want to cancel Bill #${bill.ticket_number}?\n\nThis will release all booked number allocations immediately.`,
+      [
+        { text: 'Keep Bill', style: 'cancel' },
+        {
+          text: 'Yes, Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setCancellingTicketNum(bill.ticket_number);
+            try {
+              await api.cancelTicket(bill.ticket_number);
+              Alert.alert('Success', `Bill #${bill.ticket_number} cancelled successfully.`);
+              await fetchSales();
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to cancel ticket');
+            } finally {
+              setCancellingTicketNum(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleSyncDates = () => {
@@ -416,6 +496,34 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
                       })
                     )}
                   </View>
+
+                  {/* Actions Bar: Edit and Delete Bill within time limit */}
+                  <View style={styles.billActionRow}>
+                    <TouchableOpacity
+                      style={styles.billActionBtnEdit}
+                      onPress={() => handleEditBill(item)}
+                      activeOpacity={0.8}
+                    >
+                      <Edit3 size={13} color="#2563EB" />
+                      <Text style={styles.billActionTextEdit}>Edit Bill</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.billActionBtnDelete}
+                      onPress={() => handleDeleteBill(item)}
+                      disabled={cancellingTicketNum === item.ticket_number}
+                      activeOpacity={0.8}
+                    >
+                      {cancellingTicketNum === item.ticket_number ? (
+                        <ActivityIndicator size="small" color="#DC2626" />
+                      ) : (
+                        <>
+                          <Trash2 size={13} color="#DC2626" />
+                          <Text style={styles.billActionTextDelete}>Delete Bill</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             );
@@ -539,6 +647,20 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* EDIT TICKET MODAL */}
+      <EditTicketModal
+        visible={editModalVisible}
+        ticket={selectedTicketForEdit}
+        onClose={() => {
+          setEditModalVisible(false);
+          setSelectedTicketForEdit(null);
+        }}
+        onSuccess={() => {
+          fetchSales();
+        }}
+        userPrices={userPrices}
+      />
     </View>
   );
 };
@@ -981,5 +1103,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1E293B',
     fontWeight: '500',
+  },
+  billActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#F8FAFC',
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  billActionBtnEdit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 6,
+  },
+  billActionTextEdit: {
+    fontSize: 12,
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+  billActionBtnDelete: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 6,
+  },
+  billActionTextDelete: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: '700',
   },
 });
