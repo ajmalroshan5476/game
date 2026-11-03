@@ -26,3 +26,4 @@ export async function getClipboardStringSafe(): Promise<string> {
 
   return '';
 }
+
