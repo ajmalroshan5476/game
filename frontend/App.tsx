@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { SafeAreaView, StyleSheet, View, StatusBar } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { SafeAreaView, StyleSheet, View, StatusBar, AppState } from 'react-native';
+import * as Updates from 'expo-updates';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -38,6 +39,28 @@ type Screen =
 function MainNavigator() {
   const { user, isLoading } = useAuth();
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
+
+  useEffect(() => {
+    async function checkAndApplyUpdate() {
+      if (__DEV__) return;
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch {}
+    }
+    checkAndApplyUpdate();
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        checkAndApplyUpdate();
+      }
+    });
+
+    return () => sub.remove();
+  }, []);
 
   if (isLoading) {
     return <View style={styles.container} />;

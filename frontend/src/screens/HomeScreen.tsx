@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Platform, StatusBar, Alert } from 'react-native';
+import * as Updates from 'expo-updates';
 import { useAuth } from '../context/AuthContext';
 import { MenuCard } from '../components/MenuCard';
 import { colors } from '../theme/colors';
@@ -15,6 +16,7 @@ import {
   Sparkles,
   CheckCircle2,
   Receipt,
+  RefreshCw,
 } from 'lucide-react-native';
 
 interface HomeScreenProps {
@@ -38,15 +40,44 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
             <Text style={styles.usernameText}>{displayId}</Text>
           </View>
 
-          {/* Logout Action Button (Matching screenshot top right) */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.logoutButton}
-            onPress={logout}
-            accessibilityLabel="Log out"
-          >
-            <LogOut size={20} color="#EF4444" strokeWidth={2.2} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            {/* Sync / Update App Action Button */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.syncButton}
+              onPress={async () => {
+                if (__DEV__) {
+                  Alert.alert('Development', 'Local development server is running.');
+                  return;
+                }
+                try {
+                  const check = await Updates.checkForUpdateAsync();
+                  if (check.isAvailable) {
+                    Alert.alert('Update Found', 'Downloading the latest version and restarting...');
+                    await Updates.fetchUpdateAsync();
+                    await Updates.reloadAsync();
+                  } else {
+                    Alert.alert('Up to Date', 'You are running the latest production version.');
+                  }
+                } catch (err: any) {
+                  Alert.alert('Update Check', err.message || 'Could not check for updates');
+                }
+              }}
+              accessibilityLabel="Sync App Updates"
+            >
+              <RefreshCw size={18} color="#00A86B" strokeWidth={2.4} />
+            </TouchableOpacity>
+
+            {/* Logout Action Button (Matching screenshot top right) */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.logoutButton}
+              onPress={logout}
+              accessibilityLabel="Log out"
+            >
+              <LogOut size={20} color="#EF4444" strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Action Cards Menu */}
@@ -199,6 +230,16 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  syncButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#DCFCE7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
   },
   logoutButton: {
     width: 48,
