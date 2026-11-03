@@ -13,7 +13,7 @@ import {
   SafeAreaView,
   StatusBar,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import { getClipboardStringSafe } from '../utils/clipboard';
 import { api } from '../api/client';
 import { colors } from '../theme/colors';
 import { useAuth } from '../context/AuthContext';
@@ -480,19 +480,10 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
   };
 
   /**
-   * Action when clicking the Message Button in the bottom bar
+   * Action when clicking the Message Button in the bottom bar or the PASTE button
    */
   const handleMessageButtonClick = async () => {
-    let clipText = '';
-    try {
-      clipText = await Clipboard.getStringAsync();
-    } catch {
-      if (typeof navigator !== 'undefined' && (navigator as any).clipboard) {
-        try {
-          clipText = await (navigator as any).clipboard.readText();
-        } catch {}
-      }
-    }
+    const clipText = await getClipboardStringSafe();
 
     if (clipText && clipText.trim()) {
       const parsed = parseClipboardTicketData(clipText);
@@ -1640,15 +1631,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
               <TouchableOpacity
                 style={styles.messageModalReadClipBtn}
                 onPress={async () => {
-                  try {
-                    let text = await Clipboard.getStringAsync();
-                    if (!text && typeof navigator !== 'undefined' && (navigator as any).clipboard) {
-                      try {
-                        text = await (navigator as any).clipboard.readText();
-                      } catch {}
-                    }
-                    if (text) setMessagePasteInput(text);
-                  } catch {}
+                  const text = await getClipboardStringSafe();
+                  if (text) setMessagePasteInput(text);
                 }}
               >
                 <ClipboardPaste size={15} color="#0369A1" />

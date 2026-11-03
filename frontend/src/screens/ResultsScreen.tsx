@@ -15,7 +15,7 @@ import {
   Share,
   KeyboardAvoidingView,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import { getClipboardStringSafe } from '../utils/clipboard';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
@@ -113,16 +113,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
   };
 
   const handlePasteAllSixthNumbers = async () => {
-    let text = '';
-    try {
-      text = await Clipboard.getStringAsync();
-    } catch {
-      if (typeof navigator !== 'undefined' && (navigator as any).clipboard) {
-        try {
-          text = await (navigator as any).clipboard.readText();
-        } catch {}
-      }
-    }
+    const text = await getClipboardStringSafe();
 
     if (!text || !text.trim()) {
       Alert.alert('Clipboard Empty', 'Please copy 30 numbers to clipboard first.');
