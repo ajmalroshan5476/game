@@ -155,5 +155,79 @@ console.log('Running Ticket Unit Tests...');
   assert(summary.netPay === -340, 'Consolidated Day Net Pay: 1100 + 160 - 1600 = -340 (Payable)');
 }
 
+// 8. Clipboard Ticket Data Parsing Logic
+{
+  function parseClipboardTicketData(text: string) {
+    if (!text || typeof text !== 'string') return [];
+    const results: Array<{ number: string; count: number; boxCount?: number; digitGroup: '1' | '2' | '3' }> = [];
+    const lines = text.split(/[\r\n,;]+/);
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      // 3-part: NUMBER - COUNT - BOX (e.g. 551-5-5)
+      const matchThree = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\s*[-:=/]\s*(\d+)\b/);
+      if (matchThree) {
+        const num = matchThree[1];
+        const count = parseInt(matchThree[2], 10);
+        const box = parseInt(matchThree[3], 10);
+        const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
+        results.push({
+          number: num,
+          count: isNaN(count) || count <= 0 ? 1 : count,
+          boxCount: isNaN(box) || box <= 0 ? undefined : box,
+          digitGroup: dGroup,
+        });
+        continue;
+      }
+
+      // 2-part: NUMBER - COUNT (e.g. 551-2 or 24-2)
+      const matchTwo = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\b/);
+      if (matchTwo) {
+        const num = matchTwo[1];
+        const count = parseInt(matchTwo[2], 10);
+        const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
+        results.push({
+          number: num,
+          count: isNaN(count) || count <= 0 ? 1 : count,
+          boxCount: undefined,
+          digitGroup: dGroup,
+        });
+      }
+    }
+    return results;
+  }
+
+  // Test 1: 551-5-5
+  const r1 = parseClipboardTicketData('551-5-5');
+  assert(r1.length === 1, '551-5-5 parsed 1 item');
+  assert(r1[0].number === '551' && r1[0].count === 5 && r1[0].boxCount === 5 && r1[0].digitGroup === '3', '551-5-5 has number 551, count 5, box 5, digitGroup 3');
+
+  // Test 2: 551-2
+  const r2 = parseClipboardTicketData('551-2');
+  assert(r2.length === 1, '551-2 parsed 1 item');
+  assert(r2[0].number === '551' && r2[0].count === 2 && r2[0].boxCount === undefined && r2[0].digitGroup === '3', '551-2 has number 551, count 2, no box, digitGroup 3');
+
+  // Test 3: 24-2
+  const r3 = parseClipboardTicketData('24-2');
+  assert(r3.length === 1, '24-2 parsed 1 item');
+  assert(r3[0].number === '24' && r3[0].count === 2 && r3[0].digitGroup === '2', '24-2 has number 24, count 2, digitGroup 2');
+
+  // Test 4: Multiline text
+  const multiText = `
+    Hi bro
+    551-5-5
+    551-2
+    24-2
+    Thank you
+  `;
+  const r4 = parseClipboardTicketData(multiText);
+  assert(r4.length === 3, 'Multiline text parsed 3 ticket items');
+  assert(r4[0].number === '551' && r4[0].boxCount === 5, 'Item 1 is 551 with box 5');
+  assert(r4[1].number === '551' && r4[1].count === 2, 'Item 2 is 551 with super 2');
+  assert(r4[2].number === '24' && r4[2].count === 2, 'Item 3 is 24 with qty 2');
+}
+
 console.log('All ticket unit tests PASSED successfully!');
 

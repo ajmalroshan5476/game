@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   SafeAreaView,
   StatusBar,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { api } from '../api/client';
 import { colors } from '../theme/colors';
 import {
@@ -28,6 +29,7 @@ import {
   Share2,
   ArrowLeft,
   Clock,
+  X,
 } from 'lucide-react-native';
 import { EditTicketModal } from '../components/EditTicketModal';
 
@@ -46,6 +48,65 @@ interface QueuedEntry {
   isBox: boolean;
   unitPrice: number;
   totalPrice: number;
+}
+
+export interface ParsedTicketEntry {
+  number: string;
+  count: number;
+  boxCount?: number;
+  digitGroup: '1' | '2' | '3';
+}
+
+/**
+ * Parses clipboard text into tickets.
+ * Supported patterns:
+ * - 551-5-5  => Number 551, Count 5 (SUPER), Box 5 (BOX)
+ * - 551-2    => Number 551, Count 2 (SUPER)
+ * - 24-2     => Number 24, Count 2 (AB)
+ * - 7-5      => Number 7, Count 5 (A)
+ * Also supports multi-line text from WhatsApp / SMS.
+ */
+export function parseClipboardTicketData(text: string): ParsedTicketEntry[] {
+  if (!text || typeof text !== 'string') return [];
+  const results: ParsedTicketEntry[] = [];
+  const lines = text.split(/[\r\n,;]+/);
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // Pattern 1: 3-part match (e.g. 551-5-5 or 551:5:5 or 551/5/5 or 551 5 5)
+    const matchThree = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\s*[-:=/]\s*(\d+)\b/);
+    if (matchThree) {
+      const num = matchThree[1];
+      const count = parseInt(matchThree[2], 10);
+      const box = parseInt(matchThree[3], 10);
+      const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
+      results.push({
+        number: num,
+        count: isNaN(count) || count <= 0 ? 1 : count,
+        boxCount: isNaN(box) || box <= 0 ? undefined : box,
+        digitGroup: dGroup,
+      });
+      continue;
+    }
+
+    // Pattern 2: 2-part match (e.g. 551-2 or 24-2 or 4-5)
+    const matchTwo = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\b/);
+    if (matchTwo) {
+      const num = matchTwo[1];
+      const count = parseInt(matchTwo[2], 10);
+      const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
+      results.push({
+        number: num,
+        count: isNaN(count) || count <= 0 ? 1 : count,
+        boxCount: undefined,
+        digitGroup: dGroup,
+      });
+    }
+  }
+
+  return results;
 }
 
 // Helper to compute all unique permutations of a number string (for "Set" button)
@@ -102,6 +163,15 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
   const [startRangeInput, setStartRangeInput] = useState('');
   const [endRangeInput, setEndRangeInput] = useState('');
   const [customerName, setCustomerName] = useState('');
+
+  // Focus refs for automatic pointer advance (Number -> Qty -> Box)
+  const numberInputRef = useRef<TextInput>(null);
+  const countInputRef = useRef<TextInput>(null);
+  const boxInputRef = useRef<TextInput>(null);
+
+  // Message Paste Modal (WhatsApp / Clipboard modal)
+  const [messageModalVisible, setMessageModalVisible] = useState(false);
+  const [messagePasteInput, setMessagePasteInput] = useState('');
 
   // Queued Entries
   const [entries, setEntries] = useState<QueuedEntry[]>([]);
@@ -220,11 +290,147 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
     return '#2563EB';
   };
 
-  // Handle number input according to digit group
+  // Handle number input according to digit group with auto-advance pointer to Qty column
   const handleNumberChange = (val: string) => {
     const clean = val.replace(/[^0-9]/g, '');
     const maxLen = digitGroup === '1' ? 1 : digitGroup === '2' ? 2 : 3;
-    setNumberInput(clean.slice(0, maxLen));
+    const finalVal = clean.slice(0, maxLen);
+    setNumberInput(finalVal);
+
+    // Auto-advance pointer to Qty (Count) column when number is complete!
+    if (clean.length >= maxLen) {
+      setTimeout(() => {
+        countInputRef.current?.focus();
+      }, 50);
+    }
+  };
+
+  /**
+   * Applies parsed tickets from clipboard / WhatsApp message.
+   * - If 1 ticket is parsed (e.g. 551-5-5, 551-2, 24-2): fills exact Number, Count, and Box columns!
+   * - If multiple tickets are parsed: adds all to queue entries and fills columns!
+   */
+  const applyParsedTickets = (parsed: ParsedTicketEntry[]) => {
+    if (!parsed || parsed.length === 0) return;
+
+    if (parsed.length === 1) {
+      const item = parsed[0];
+      setDigitGroup(item.digitGroup);
+      setNumberInput(item.number);
+      setCountInput(String(item.count));
+      setBoxCountInput(item.boxCount !== undefined ? String(item.boxCount) : '');
+      setIsRange(false);
+
+      setTimeout(() => {
+        if (item.digitGroup === '3' && item.boxCount !== undefined) {
+          boxInputRef.current?.focus();
+        } else {
+          countInputRef.current?.focus();
+        }
+      }, 80);
+
+      Alert.alert(
+        'Clipboard Pasted!',
+        `Pasted into exact columns:\n• Number: ${item.number}\n• Qty: ${item.count}${item.boxCount !== undefined ? `\n• Box: ${item.boxCount}` : ''}`
+      );
+      return;
+    }
+
+    // Multiple tickets in clipboard
+    const newItems: QueuedEntry[] = [];
+    for (const item of parsed) {
+      if (item.digitGroup === '3') {
+        const superPrice = getModeUnitPrice('SUPER');
+        const boxPrice = getModeUnitPrice('BOX');
+
+        newItems.push({
+          id: Math.random().toString(36).substring(2, 9),
+          number: item.number.padStart(3, '0'),
+          quantity: item.count,
+          mode: 'SUPER',
+          isBox: false,
+          unitPrice: superPrice,
+          totalPrice: item.count * superPrice,
+        });
+
+        if (item.boxCount && item.boxCount > 0) {
+          newItems.push({
+            id: Math.random().toString(36).substring(2, 9),
+            number: item.number.padStart(3, '0'),
+            quantity: item.boxCount,
+            mode: 'BOX',
+            isBox: true,
+            unitPrice: boxPrice,
+            totalPrice: item.boxCount * boxPrice,
+          });
+        }
+      } else if (item.digitGroup === '2') {
+        const modePrice = getModeUnitPrice('AB');
+        newItems.push({
+          id: Math.random().toString(36).substring(2, 9),
+          number: item.number.padStart(2, '0'),
+          quantity: item.count,
+          mode: 'AB',
+          isBox: false,
+          unitPrice: modePrice,
+          totalPrice: item.count * modePrice,
+        });
+      } else if (item.digitGroup === '1') {
+        const modePrice = getModeUnitPrice('A');
+        newItems.push({
+          id: Math.random().toString(36).substring(2, 9),
+          number: item.number,
+          quantity: item.count,
+          mode: 'A',
+          isBox: false,
+          unitPrice: modePrice,
+          totalPrice: item.count * modePrice,
+        });
+      }
+    }
+
+    setEntries((prev) => [...prev, ...newItems]);
+
+    // Also place first item into columns
+    const first = parsed[0];
+    setDigitGroup(first.digitGroup);
+    setNumberInput(first.number);
+    setCountInput(String(first.count));
+    setBoxCountInput(first.boxCount !== undefined ? String(first.boxCount) : '');
+    setIsRange(false);
+
+    Alert.alert(
+      'Tickets Added to Queue!',
+      `Successfully parsed and added ${newItems.length} entries (${parsed.length} orders) from clipboard into queue!\n\nReady to SAVE.`
+    );
+  };
+
+  /**
+   * Action when clicking the Message Button in the bottom bar
+   */
+  const handleMessageButtonClick = async () => {
+    let clipText = '';
+    try {
+      clipText = await Clipboard.getStringAsync();
+    } catch {
+      if (typeof navigator !== 'undefined' && (navigator as any).clipboard) {
+        try {
+          clipText = await (navigator as any).clipboard.readText();
+        } catch {}
+      }
+    }
+
+    if (clipText && clipText.trim()) {
+      const parsed = parseClipboardTicketData(clipText);
+      if (parsed.length > 0) {
+        applyParsedTickets(parsed);
+        return;
+      }
+    }
+
+    // If clipboard is empty or had no match, open fallback dialog
+    setMessagePasteInput(clipText || '');
+    setMessageModalVisible(true);
   };
 
   /**
@@ -777,33 +983,50 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
           <View style={styles.inputsRow}>
             {/* Number Input */}
             <TextInput
+              ref={numberInputRef}
               style={[styles.inputBox, { flex: digitGroup === '3' ? 1.2 : 1 }]}
               placeholder="Number"
               placeholderTextColor="#94A3B8"
               keyboardType="numeric"
               value={numberInput}
               onChangeText={handleNumberChange}
+              returnKeyType="next"
+              onSubmitEditing={() => countInputRef.current?.focus()}
             />
 
             {/* Count Input */}
             <TextInput
+              ref={countInputRef}
               style={[styles.inputBox, { flex: 1 }]}
               placeholder="Count"
               placeholderTextColor="#94A3B8"
               keyboardType="numeric"
               value={countInput}
               onChangeText={setCountInput}
+              returnKeyType={digitGroup === '3' ? 'next' : 'done'}
+              onSubmitEditing={() => {
+                if (digitGroup === '3') {
+                  boxInputRef.current?.focus();
+                } else {
+                  handleModeButtonClick('ALL');
+                }
+              }}
             />
 
             {/* Box Rectangle Input */}
             {digitGroup === '3' && (
               <TextInput
+                ref={boxInputRef}
                 style={[styles.inputBox, { flex: 1 }]}
                 placeholder="Box"
                 placeholderTextColor="#94A3B8"
                 keyboardType="numeric"
                 value={boxCountInput}
                 onChangeText={setBoxCountInput}
+                returnKeyType="done"
+                onSubmitEditing={() => {
+                  handleModeButtonClick(boxCountInput.trim() ? 'ALL' : 'SUPER');
+                }}
               />
             )}
           </View>
@@ -1061,13 +1284,11 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             <Text style={styles.bottomBtnText}>MENU</Text>
           </TouchableOpacity>
 
-          {/* Message (WhatsApp/Chat) */}
+          {/* Message (WhatsApp/Chat - Clipboard Paste) */}
           <TouchableOpacity
             style={[styles.bottomBtn, { backgroundColor: '#00897B' }]}
             activeOpacity={0.8}
-            onPress={() => {
-              Alert.alert('Message', `Current Queue: ${entries.length} tickets, Total: ₹${totalAmount}`);
-            }}
+            onPress={handleMessageButtonClick}
           >
             <View style={styles.btnIconRow}>
               <MessageCircle size={16} color="#FFFFFF" />
@@ -1239,6 +1460,78 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
           </View>
         </View>
       </Modal>
+      {/* MESSAGE / WHATSAPP PASTE MODAL */}
+      <Modal
+        visible={messageModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMessageModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.messageModalCard}>
+            <View style={styles.messageModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MessageCircle size={20} color="#00897B" />
+                <Text style={styles.messageModalTitle}>Paste WhatsApp / Orders</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setMessageModalVisible(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <X size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.messageModalSubtitle}>
+              Paste WhatsApp text or customer tickets formatted like:
+            </Text>
+            <View style={styles.messageExampleBox}>
+              <Text style={styles.messageExampleText}>• 551-5-5  → 551, 5 SUPER, 5 BOX</Text>
+              <Text style={styles.messageExampleText}>• 551-2    → 551, 2 SUPER</Text>
+              <Text style={styles.messageExampleText}>• 24-2     → 24, 2 QTY</Text>
+            </View>
+
+            <TextInput
+              style={styles.messageModalInput}
+              placeholder="Paste or type clipboard text here...&#10;e.g.&#10;551-5-5&#10;551-2&#10;24-2"
+              placeholderTextColor="#94A3B8"
+              multiline
+              numberOfLines={4}
+              value={messagePasteInput}
+              onChangeText={setMessagePasteInput}
+              autoFocus
+            />
+
+            <View style={styles.messageModalButtonsRow}>
+              <TouchableOpacity
+                style={styles.messageModalCancelBtn}
+                onPress={() => setMessageModalVisible(false)}
+              >
+                <Text style={styles.messageModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.messageModalApplyBtn}
+                onPress={() => {
+                  if (!messagePasteInput.trim()) {
+                    Alert.alert('Empty Input', 'Please paste or enter message text');
+                    return;
+                  }
+                  const parsed = parseClipboardTicketData(messagePasteInput);
+                  if (parsed.length === 0) {
+                    Alert.alert('No Tickets Found', 'Could not find ticket patterns like 551-5-5 or 551-2 in the text.');
+                    return;
+                  }
+                  setMessageModalVisible(false);
+                  applyParsedTickets(parsed);
+                }}
+              >
+                <Text style={styles.messageModalApplyText}>Paste into Columns</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1247,12 +1540,13 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#00A86B',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ? StatusBar.currentHeight + 14 : 36) : 12,
   },
   topControlContainer: {
     backgroundColor: '#00A86B',
     paddingHorizontal: 12,
-    paddingTop: Platform.OS === 'android' ? 12 : 8,
-    paddingBottom: 12,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
   topHeaderRow: {
     flexDirection: 'row',
@@ -1846,5 +2140,87 @@ const styles = StyleSheet.create({
   limitAlertCloseText: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  // MESSAGE PASTE MODAL STYLES
+  messageModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    width: '100%',
+    maxWidth: 380,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 10 },
+      android: { elevation: 6 },
+    }),
+  },
+  messageModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  messageModalTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  messageModalSubtitle: {
+    fontSize: 12,
+    color: '#475569',
+    marginBottom: 8,
+  },
+  messageExampleBox: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+    gap: 3,
+  },
+  messageExampleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#15803D',
+  },
+  messageModalInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 14,
+    color: '#0F172A',
+    minHeight: 100,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+  },
+  messageModalButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  messageModalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+  },
+  messageModalCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  messageModalApplyBtn: {
+    flex: 1.5,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#00897B',
+    alignItems: 'center',
+  },
+  messageModalApplyText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

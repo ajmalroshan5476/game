@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   Share,
   KeyboardAvoidingView,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
@@ -82,6 +83,94 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
   const [singleSixthInput, setSingleSixthInput] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [drawsList, setDrawsList] = useState<any[]>([]);
+
+  // 30 Fixed Slots for 6th Prize (Consolations)
+  const [sixthSlots, setSixthSlots] = useState<string[]>(() => Array(30).fill(''));
+  const slotRefs = useRef<(TextInput | null)[]>([]);
+
+  const syncSlotsFromList = (list: string[]) => {
+    const next = Array(30).fill('');
+    for (let i = 0; i < Math.min(30, list.length); i++) {
+      next[i] = String(list[i] || '').trim();
+    }
+    setSixthSlots(next);
+    setSixthList(list);
+  };
+
+  const handleSlotChange = (index: number, val: string) => {
+    const clean = val.replace(/[^0-9]/g, '').slice(0, 3);
+    setSixthSlots((prev) => {
+      const next = [...prev];
+      next[index] = clean;
+      setSixthList(next.filter(Boolean));
+      return next;
+    });
+
+    // Auto-advance to next column when 3 digits are entered!
+    if (clean.length === 3 && index < 29) {
+      slotRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handlePasteAllSixthNumbers = async () => {
+    let text = '';
+    try {
+      text = await Clipboard.getStringAsync();
+    } catch {
+      if (typeof navigator !== 'undefined' && (navigator as any).clipboard) {
+        try {
+          text = await (navigator as any).clipboard.readText();
+        } catch {}
+      }
+    }
+
+    if (!text || !text.trim()) {
+      Alert.alert('Clipboard Empty', 'Please copy 30 numbers to clipboard first.');
+      return;
+    }
+
+    const parts = text.split(/[,\s\n\r]+/).map((p) => p.trim()).filter(Boolean);
+    const validNumbers: string[] = [];
+    for (const p of parts) {
+      const clean = p.replace(/[^0-9]/g, '');
+      if (clean.length >= 1 && clean.length <= 3) {
+        validNumbers.push(clean.padStart(3, '0'));
+      }
+    }
+
+    if (validNumbers.length === 0) {
+      Alert.alert('No Numbers Found', 'Could not find valid 3-digit numbers in clipboard text.');
+      return;
+    }
+
+    setSixthSlots((prev) => {
+      const next = [...prev];
+      for (let i = 0; i < Math.min(30, validNumbers.length); i++) {
+        next[i] = validNumbers[i];
+      }
+      setSixthList(next.filter(Boolean));
+      return next;
+    });
+
+    Alert.alert(
+      'Filled from Clipboard!',
+      `Successfully loaded ${Math.min(30, validNumbers.length)} of 30 columns from clipboard!\nYou can edit any column separately.`
+    );
+  };
+
+  const handleClearAllSixthSlots = () => {
+    Alert.alert('Clear All 30 Columns', 'Reset all 30 6th prize columns?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear All',
+        style: 'destructive',
+        onPress: () => {
+          setSixthSlots(Array(30).fill(''));
+          setSixthList([]);
+        },
+      },
+    ]);
+  };
 
   // Fetched Results
   const [loading, setLoading] = useState(false);
@@ -240,7 +329,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
             sixth = data.result.sixthPrizes.split(/[,\s]+/).filter(Boolean);
           }
         }
-        setSixthList(sixth);
+        syncSlotsFromList(sixth);
       } else {
         setIsEditingResult(false);
         setFirstPrize('');
@@ -248,7 +337,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
         setThirdPrize('');
         setFourthPrize('');
         setFifthPrize('');
-        setSixthList([]);
+        syncSlotsFromList([]);
       }
     } catch {
       setIsEditingResult(false);
@@ -268,7 +357,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
       setThirdPrize('');
       setFourthPrize('');
       setFifthPrize('');
-      setSixthList([]);
+      syncSlotsFromList([]);
     }
     setShowPublishModal(true);
   };
@@ -294,7 +383,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
         sixth = currentResult.sixth_prizes.split(/[,\s]+/).filter(Boolean);
       }
     }
-    setSixthList(sixth);
+    syncSlotsFromList(sixth);
     setSingleSixthInput('');
     setShowPublishModal(true);
   };
@@ -466,23 +555,9 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
       return;
     }
 
-    // Auto append if something is in singleSixthInput
-    let currentSixth = [...sixthList];
-    const raw = singleSixthInput.trim();
-    if (raw) {
-      const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
-      for (const p of parts) {
-        if (/^\d{1,3}$/.test(p)) {
-          const padded = p.padStart(3, '0').slice(-3);
-          currentSixth.push(padded);
-        }
-      }
-      setSixthList(currentSixth);
-      setSingleSixthInput('');
-    }
-
+    const currentSixth = sixthSlots.map((s) => s.trim()).filter(Boolean);
     if (currentSixth.length === 0) {
-      Alert.alert('No 6th Prizes', 'Please add 6th prize numbers before publishing.');
+      Alert.alert('No 6th Prizes', 'Please enter at least one 6th prize number in the 30 columns before publishing.');
       return;
     }
 
@@ -538,20 +613,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
       return;
     }
 
-    // Auto append if something is in singleSixthInput
-    let currentSixth = [...sixthList];
-    const raw = singleSixthInput.trim();
-    if (raw) {
-      const parts = raw.split(/[,\s]+/).map((p) => p.trim()).filter(Boolean);
-      for (const p of parts) {
-        if (/^\d{1,3}$/.test(p)) {
-          const padded = p.padStart(3, '0').slice(-3);
-          currentSixth.push(padded);
-        }
-      }
-      setSixthList(currentSixth);
-      setSingleSixthInput('');
-    }
+    const currentSixth = sixthSlots.map((s) => s.trim()).filter(Boolean);
 
     setPublishing(true);
     try {
@@ -1448,91 +1510,94 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                   </View>
 
                   <Text style={styles.sectionHeading}>
-                    ENTER / EDIT 6TH PRIZES (CONSOLATIONS)
+                    ENTER / EDIT 6TH PRIZES (30 INDIVIDUAL COLUMNS)
                   </Text>
                   <Text style={styles.sectionSubtitle}>
-                    Enter 3-digit numbers separated by spaces, commas, or new lines.
+                    Enter 30 results in separate columns below. Editing any column preserves its exact position without shifting results.
                   </Text>
 
-                  <View style={{ marginBottom: 12 }}>
-                    <TextInput
-                      style={styles.largeSixthTextArea}
-                      placeholder="e.g. 040 318 649 105 882 743 219 950&#10;Paste full list or type numbers here..."
-                      placeholderTextColor="#94A3B8"
-                      multiline={true}
-                      numberOfLines={4}
-                      value={singleSixthInput}
-                      onChangeText={setSingleSixthInput}
-                    />
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                      <TouchableOpacity
-                        style={[styles.addSixthBtn, { flex: 1, height: 42 }]}
-                        onPress={handleAddSixthNumber}
-                      >
-                        <Plus size={18} color="#FFFFFF" />
-                        <Text style={[styles.addSixthBtnText, { fontSize: 14 }]}>
-                          Add / Append Numbers
-                        </Text>
-                      </TouchableOpacity>
-                      {singleSixthInput.length > 0 && (
-                        <TouchableOpacity
-                          style={styles.clearInputTextBtn}
-                          onPress={() => setSingleSixthInput('')}
-                        >
-                          <Text style={styles.clearInputText}>Clear Box</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
+                  {/* Actions Bar: Paste from Clipboard & Clear All */}
+                  <View style={styles.sixthTopActionsBar}>
+                    <TouchableOpacity
+                      style={styles.pasteSixthBtn}
+                      activeOpacity={0.8}
+                      onPress={handlePasteAllSixthNumbers}
+                    >
+                      <Plus size={14} color="#FFFFFF" />
+                      <Text style={styles.pasteSixthBtnText}>Paste 30 from Clipboard</Text>
+                    </TouchableOpacity>
 
-                  {/* Sixth numbers count & Clear All */}
-                  <View style={styles.sixthMetaRow}>
-                    <Text style={styles.sixthCountBadge}>
-                      {sixthList.length} Numbers Configured
+                    <Text style={styles.sixthCountBadgeNew}>
+                      {sixthSlots.filter((s) => s.trim().length > 0).length} / 30 Filled
                     </Text>
-                    {sixthList.length > 0 && (
+
+                    {sixthSlots.some((s) => s.trim().length > 0) && (
                       <TouchableOpacity
-                        onPress={() => setSixthList([])}
-                        style={styles.clearAllSixthBtn}
+                        style={styles.clearAllSixthBtnNew}
+                        activeOpacity={0.8}
+                        onPress={handleClearAllSixthSlots}
                       >
                         <Trash2 size={13} color="#DC2626" />
-                        <Text style={styles.clearAllSixthText}>Clear All ({sixthList.length})</Text>
+                        <Text style={styles.clearAllSixthTextNew}>Clear All</Text>
                       </TouchableOpacity>
                     )}
                   </View>
 
-                  {/* Sixth numbers chips */}
-                  {sixthList.length === 0 ? (
-                    <View style={styles.emptySixthBox}>
-                      <Text style={styles.emptySixthText}>
-                        No 6th prizes added yet. Type or paste 3-digit numbers into the box above and tap "Add / Append Numbers".
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.scrollableChipsWrapper}>
-                      <ScrollView
-                        style={{ maxHeight: 220 }}
-                        nestedScrollEnabled={true}
-                        showsVerticalScrollIndicator={true}
-                      >
-                        <View style={styles.sixthChipsGrid}>
-                          {sixthList.map((num, idx) => (
-                            <View key={idx} style={styles.sixthChip}>
-                              <Text style={styles.sixthChipIndex}>#{idx + 1}</Text>
-                              <Text style={styles.sixthChipText}>{num}</Text>
-                              <TouchableOpacity
-                                style={styles.removeChipBtn}
-                                onPress={() => handleRemoveSixthNumber(idx)}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  {/* 30 Scrollable Columns Grid */}
+                  <ScrollView
+                    style={styles.thirtySlotsScroll}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                  >
+                    <View style={styles.thirtySlotsGrid}>
+                      {sixthSlots.map((val, idx) => {
+                        const isFilled = val.trim().length === 3;
+                        return (
+                          <View
+                            key={idx}
+                            style={[styles.slotCard, isFilled && styles.slotCardFilled]}
+                          >
+                            <View style={styles.slotHeader}>
+                              <Text
+                                style={[
+                                  styles.slotNumberLabel,
+                                  isFilled && styles.slotNumberLabelFilled,
+                                ]}
                               >
-                                <X size={13} color="#DC2626" />
-                              </TouchableOpacity>
+                                #{idx + 1}
+                              </Text>
+                              {val.length > 0 && (
+                                <TouchableOpacity
+                                  onPress={() => handleSlotChange(idx, '')}
+                                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                >
+                                  <X size={12} color="#94A3B8" />
+                                </TouchableOpacity>
+                              )}
                             </View>
-                          ))}
-                        </View>
-                      </ScrollView>
+                            <TextInput
+                              ref={(el) => {
+                                slotRefs.current[idx] = el;
+                              }}
+                              style={[styles.slotInput, isFilled && styles.slotInputFilled]}
+                              placeholder="000"
+                              placeholderTextColor="#CBD5E1"
+                              keyboardType="numeric"
+                              maxLength={3}
+                              value={val}
+                              onChangeText={(text) => handleSlotChange(idx, text)}
+                              returnKeyType={idx === 29 ? 'done' : 'next'}
+                              onSubmitEditing={() => {
+                                if (idx < 29) {
+                                  slotRefs.current[idx + 1]?.focus();
+                                }
+                              }}
+                            />
+                          </View>
+                        );
+                      })}
                     </View>
-                  )}
+                  </ScrollView>
 
                   {/* Dedicated 6th Prize Publish Button */}
                   <TouchableOpacity
@@ -2480,6 +2545,110 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
+  },
+  // 30 SLOTS 6TH PRIZE STYLES
+  thirtySlotsScroll: {
+    maxHeight: 290,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 8,
+    marginBottom: 14,
+  },
+  thirtySlotsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  slotCard: {
+    width: '31%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    padding: 6,
+    alignItems: 'center',
+  },
+  slotCardFilled: {
+    borderColor: '#059669',
+    backgroundColor: '#F0FDF4',
+  },
+  slotHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 4,
+  },
+  slotNumberLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+  },
+  slotNumberLabelFilled: {
+    color: '#059669',
+  },
+  slotInput: {
+    width: '100%',
+    height: 38,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  slotInputFilled: {
+    borderColor: '#10B981',
+    color: '#047857',
+  },
+  sixthTopActionsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    gap: 8,
+  },
+  pasteSixthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 6,
+  },
+  pasteSixthBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  clearAllSixthBtnNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 6,
+  },
+  clearAllSixthTextNew: {
+    color: '#DC2626',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sixthCountBadgeNew: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0F172A',
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
   },
   clearAllSixthBtn: {
     flexDirection: 'row',
