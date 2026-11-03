@@ -160,40 +160,56 @@ console.log('Running Ticket Unit Tests...');
   function parseClipboardTicketData(text: string) {
     if (!text || typeof text !== 'string') return [];
     const results: Array<{ number: string; count: number; boxCount?: number; digitGroup: '1' | '2' | '3' }> = [];
-    const lines = text.split(/[\r\n,;]+/);
+    const lines = text.split(/[\r\n]+/);
 
     for (const rawLine of lines) {
-      const line = rawLine.trim();
+      if (!rawLine.trim()) continue;
+
+      const line = rawLine
+        // Strip WhatsApp bracket metadata e.g. [10:36 PM, 11/4/2026] Name:
+        .replace(/^\[.*?\]\s*(?:[^:\r\n]+:)?\s*/, '')
+        // Strip WhatsApp dash metadata e.g. 11/4/2026, 10:36 PM - Name:
+        .replace(/^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*-\s*(?:[^:\r\n]+:)?\s*/gi, '')
+        // Strip trailing or standalone timestamps like 10:36 PM or 10:36 or 10:36:00 AM
+        .replace(/\s*\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b\s*/gi, ' ')
+        // Strip dates like 11/4/2026 or 11-04-2026
+        .replace(/\s*\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b\s*/g, ' ')
+        .trim();
+
       if (!line) continue;
 
-      // 3-part: NUMBER - COUNT - BOX (e.g. 551-5-5)
-      const matchThree = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\s*[-:=/]\s*(\d+)\b/);
-      if (matchThree) {
-        const num = matchThree[1];
-        const count = parseInt(matchThree[2], 10);
-        const box = parseInt(matchThree[3], 10);
+      // Pattern 1: match 3-part or 2-part patterns with delimiter (-, :, /, or ,)
+      const regex = /\b(\d{1,3})\s*[-:=/,]\s*(\d+)(?:\s*[-:=/,]\s*(\d+))?\b/g;
+      let match;
+      let found = false;
+      while ((match = regex.exec(line)) !== null) {
+        found = true;
+        const num = match[1];
+        const count = parseInt(match[2], 10);
+        const box = match[3] ? parseInt(match[3], 10) : undefined;
         const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
         results.push({
           number: num,
           count: isNaN(count) || count <= 0 ? 1 : count,
-          boxCount: isNaN(box) || box <= 0 ? undefined : box,
+          boxCount: box !== undefined && !isNaN(box) && box > 0 ? box : undefined,
           digitGroup: dGroup,
         });
-        continue;
       }
 
-      // 2-part: NUMBER - COUNT (e.g. 551-2 or 24-2)
-      const matchTwo = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\b/);
-      if (matchTwo) {
-        const num = matchTwo[1];
-        const count = parseInt(matchTwo[2], 10);
-        const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
-        results.push({
-          number: num,
-          count: isNaN(count) || count <= 0 ? 1 : count,
-          boxCount: undefined,
-          digitGroup: dGroup,
-        });
+      if (!found) {
+        const spaceMatch = line.match(/\b(\d{1,3})\s+(\d+)(?:\s+(\d+))?\b/);
+        if (spaceMatch) {
+          const num = spaceMatch[1];
+          const count = parseInt(spaceMatch[2], 10);
+          const box = spaceMatch[3] ? parseInt(spaceMatch[3], 10) : undefined;
+          const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
+          results.push({
+            number: num,
+            count: isNaN(count) || count <= 0 ? 1 : count,
+            boxCount: box !== undefined && !isNaN(box) && box > 0 ? box : undefined,
+            digitGroup: dGroup,
+          });
+        }
       }
     }
     return results;
@@ -227,6 +243,21 @@ console.log('Running Ticket Unit Tests...');
   assert(r4[0].number === '551' && r4[0].boxCount === 5, 'Item 1 is 551 with box 5');
   assert(r4[1].number === '551' && r4[1].count === 2, 'Item 2 is 551 with super 2');
   assert(r4[2].number === '24' && r4[2].count === 2, 'Item 3 is 24 with qty 2');
+
+  // Test 5: Exact WhatsApp screenshot message with timestamp
+  const whatsappScreenshot = `
+    551-5-5
+    345-2-1
+    456-3-2
+    478-5-3 10:36 PM
+  `;
+  const r5 = parseClipboardTicketData(whatsappScreenshot);
+  console.log('r5 result:', JSON.stringify(r5));
+  assert(r5.length === 4, 'Exact WhatsApp screenshot parsed 4 ticket orders');
+  assert(r5[0].number === '551' && r5[0].count === 5 && r5[0].boxCount === 5, '551: 5 super, 5 box');
+  assert(r5[1].number === '345' && r5[1].count === 2 && r5[1].boxCount === 1, '345: 2 super, 1 box');
+  assert(r5[2].number === '456' && r5[2].count === 3 && r5[2].boxCount === 2, '456: 3 super, 2 box');
+  assert(r5[3].number === '478' && r5[3].count === 5 && r5[3].boxCount === 3, '478: 5 super, 3 box (timestamp 10:36 PM ignored)');
 }
 
 console.log('All ticket unit tests PASSED successfully!');

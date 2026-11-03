@@ -1,22 +1,24 @@
+import { requireOptionalNativeModule } from 'expo';
+
 /**
  * Safely retrieves clipboard text on any platform.
- * Gracefully handles older native APKs where expo-clipboard native module was not yet compiled,
- * avoiding fatal requireNativeModule startup crashes.
+ * NEVER calls require('expo-clipboard') or requireNativeModule unless
+ * the native module is verified to exist in the compiled APK binary.
+ * This guarantees zero crashes on older APK builds.
  */
 export async function getClipboardStringSafe(): Promise<string> {
+  // 1. Native Expo module check - completely safe, does not throw if absent!
   try {
-    // Dynamic require so the bundle does not crash on startup if native module is absent
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Clipboard = require('expo-clipboard');
-    if (Clipboard && typeof Clipboard.getStringAsync === 'function') {
-      const text = await Clipboard.getStringAsync();
+    const ExpoClipboard = requireOptionalNativeModule('ExpoClipboard');
+    if (ExpoClipboard && typeof ExpoClipboard.getStringAsync === 'function') {
+      const text = await ExpoClipboard.getStringAsync({});
       if (typeof text === 'string') return text;
     }
   } catch {
-    // Native module not linked in older APK build
+    // Native module missing or security restriction - safe fallback
   }
 
-  // Web fallback (navigator.clipboard)
+  // 2. Web fallback (navigator.clipboard)
   if (typeof navigator !== 'undefined' && (navigator as any).clipboard?.readText) {
     try {
       const text = await (navigator as any).clipboard.readText();
@@ -27,3 +29,14 @@ export async function getClipboardStringSafe(): Promise<string> {
   return '';
 }
 
+/**
+ * Checks whether native OS clipboard auto-read is supported on this device.
+ */
+export function isNativeClipboardAvailable(): boolean {
+  try {
+    const ExpoClipboard = requireOptionalNativeModule('ExpoClipboard');
+    return !!(ExpoClipboard && typeof ExpoClipboard.getStringAsync === 'function');
+  } catch {
+    return false;
+  }
+}

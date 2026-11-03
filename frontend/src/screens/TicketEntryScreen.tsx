@@ -77,7 +77,20 @@ export function parseClipboardTicketData(text: string): ParsedTicketEntry[] {
   const lines = text.split(/[\r\n]+/);
 
   for (const rawLine of lines) {
-    const line = rawLine.trim();
+    if (!rawLine.trim()) continue;
+
+    // Clean line: remove timestamps, dates, and WhatsApp metadata
+    const line = rawLine
+      // Strip WhatsApp bracket metadata e.g. [10:36 PM, 11/4/2026] Name:
+      .replace(/^\[.*?\]\s*(?:[^:\r\n]+:)?\s*/, '')
+      // Strip WhatsApp dash metadata e.g. 11/4/2026, 10:36 PM - Name:
+      .replace(/^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4},?\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\s*-\s*(?:[^:\r\n]+:)?\s*/gi, '')
+      // Strip trailing or standalone timestamps like 10:36 PM or 10:36 or 10:36:00 AM
+      .replace(/\s*\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b\s*/gi, ' ')
+      // Strip dates like 11/4/2026 or 11-04-2026
+      .replace(/\s*\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b\s*/g, ' ')
+      .trim();
+
     if (!line) continue;
 
     // Pattern 1: match 3-part or 2-part patterns with hyphens, colons, slashes, or commas
@@ -381,36 +394,13 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
 
   /**
    * Applies parsed tickets from clipboard / WhatsApp message.
-   * - If 1 ticket is parsed (e.g. 551-5-5, 551-2, 24-2): fills exact Number, Count, and Box columns!
-   * - If multiple tickets are parsed: adds all to queue entries and fills columns!
+   * - Parses all ticket orders (e.g. 551-5-5, 345-2-1, 456-3-2, 478-5-3 10:36 PM, 551-2, 24-2)
+   * - Equates all tickets into the window's entry queue (SUPER, BOX, AB, A)
+   * - Updates totals, displays first ticket in columns, ready to save!
    */
   const applyParsedTickets = (parsed: ParsedTicketEntry[]) => {
     if (!parsed || parsed.length === 0) return;
 
-    if (parsed.length === 1) {
-      const item = parsed[0];
-      setDigitGroup(item.digitGroup);
-      setNumberInput(item.number);
-      setCountInput(String(item.count));
-      setBoxCountInput(item.boxCount !== undefined ? String(item.boxCount) : '');
-      setIsRange(false);
-
-      setTimeout(() => {
-        if (item.digitGroup === '3' && item.boxCount !== undefined) {
-          boxInputRef.current?.focus();
-        } else {
-          countInputRef.current?.focus();
-        }
-      }, 80);
-
-      Alert.alert(
-        'Clipboard Pasted!',
-        `Pasted into exact columns:\n• Number: ${item.number}\n• Qty: ${item.count}${item.boxCount !== undefined ? `\n• Box: ${item.boxCount}` : ''}`
-      );
-      return;
-    }
-
-    // Multiple tickets in clipboard
     const newItems: QueuedEntry[] = [];
     for (const item of parsed) {
       if (item.digitGroup === '3') {
@@ -463,9 +453,10 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
       }
     }
 
+    // Equate all parsed tickets into the window entries queue table
     setEntries((prev) => [...prev, ...newItems]);
 
-    // Also place first item into columns
+    // Also populate top columns with the first ticket
     const first = parsed[0];
     setDigitGroup(first.digitGroup);
     setNumberInput(first.number);
@@ -473,9 +464,12 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
     setBoxCountInput(first.boxCount !== undefined ? String(first.boxCount) : '');
     setIsRange(false);
 
+    const totalQty = newItems.reduce((sum, item) => sum + item.quantity, 0);
+    const totalPrice = newItems.reduce((sum, item) => sum + item.totalPrice, 0);
+
     Alert.alert(
-      'Tickets Added to Queue!',
-      `Successfully parsed and added ${newItems.length} entries (${parsed.length} orders) from clipboard into queue!\n\nReady to SAVE.`
+      'Tickets Equated!',
+      `Equated ${newItems.length} ticket entries (${parsed.length} orders) into the window.\nTotal Qty: ${totalQty} | Total: ₹${totalPrice}\n\nReady to SAVE.`
     );
   };
 
@@ -483,19 +477,25 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
    * Action when clicking the Message Button in the bottom bar or the PASTE button
    */
   const handleMessageButtonClick = async () => {
-    const clipText = await getClipboardStringSafe();
+    try {
+      const clipText = await getClipboardStringSafe();
 
-    if (clipText && clipText.trim()) {
-      const parsed = parseClipboardTicketData(clipText);
-      if (parsed.length > 0) {
-        applyParsedTickets(parsed);
-        return;
+      if (clipText && clipText.trim()) {
+        const parsed = parseClipboardTicketData(clipText);
+        if (parsed.length > 0) {
+          applyParsedTickets(parsed);
+          return;
+        }
       }
-    }
 
-    // If clipboard is empty or had no match, open fallback dialog
-    setMessagePasteInput(clipText || '');
-    setMessageModalVisible(true);
+      // If clipboard is empty or had no match, open fallback dialog safely
+      setMessagePasteInput(clipText || '');
+      setMessageModalVisible(true);
+    } catch (err: any) {
+      console.warn('Clipboard read error:', err);
+      setMessagePasteInput('');
+      setMessageModalVisible(true);
+    }
   };
 
   /**
@@ -807,74 +807,76 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
   const handleSaveTicket = () => {
     let itemsToSubmit = [...entries];
 
-    // If Range inputs are filled and not yet added to queue
-    if (isRange && startRangeInput.trim() && endRangeInput.trim()) {
-      const s = parseInt(startRangeInput, 10);
-      const e = parseInt(endRangeInput, 10);
-      if (isNaN(s) || isNaN(e) || s > e) {
-        Alert.alert('Invalid Range', 'Please enter a valid start and end number (e.g. 101 to 105)');
-        return;
-      }
-      if (e - s + 1 > 500) {
-        Alert.alert('Range Limit', 'Maximum 500 numbers allowed in a range');
-        return;
-      }
+    // If entries queue is empty, auto-expand pending Range or Number inputs
+    if (itemsToSubmit.length === 0) {
+      if (isRange && startRangeInput.trim() && endRangeInput.trim()) {
+        const s = parseInt(startRangeInput, 10);
+        const e = parseInt(endRangeInput, 10);
+        if (isNaN(s) || isNaN(e) || s > e) {
+          Alert.alert('Invalid Range', 'Please enter a valid start and end number (e.g. 101 to 105)');
+          return;
+        }
+        if (e - s + 1 > 500) {
+          Alert.alert('Range Limit', 'Maximum 500 numbers allowed in a range');
+          return;
+        }
 
-      const qty = parseInt(countInput, 10) || 1;
-      const padLen = digitGroup === '1' ? 1 : digitGroup === '2' ? 2 : 3;
-      const modeToUse = digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A';
-      const unitPrice = getModeUnitPrice(modeToUse);
-      const autoRangeItems: QueuedEntry[] = [];
+        const qty = parseInt(countInput, 10) || 1;
+        const padLen = digitGroup === '1' ? 1 : digitGroup === '2' ? 2 : 3;
+        const modeToUse = digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A';
+        const unitPrice = getModeUnitPrice(modeToUse);
+        const autoRangeItems: QueuedEntry[] = [];
 
-      for (let i = s; i <= e; i++) {
-        const numStr = String(i).padStart(padLen, '0');
-        autoRangeItems.push({
-          id: Math.random().toString(36).substring(2, 9),
-          number: numStr,
-          quantity: qty,
-          mode: modeToUse,
-          isBox: false,
-          unitPrice,
-          totalPrice: qty * unitPrice,
-        });
-      }
-      itemsToSubmit = [...itemsToSubmit, ...autoRangeItems];
-    } else if (!isRange && numberInput.trim()) {
-      // If single number is filled and not yet added to queue
-      const qty = parseInt(countInput, 10) || 1;
-      const cleanNum = numberInput.trim();
-      const requiredLen = digitGroup === '1' ? 1 : digitGroup === '2' ? 2 : 3;
-      const formattedNum = cleanNum.padStart(requiredLen, '0');
-      const targets = isSet ? getUniquePermutations(formattedNum) : [formattedNum];
-      const mainMode = digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A';
-      const mainUnitPrice = getModeUnitPrice(mainMode);
-      const boxUnitPrice = getModeUnitPrice('BOX');
-      const autoSingleItems: QueuedEntry[] = [];
+        for (let i = s; i <= e; i++) {
+          const numStr = String(i).padStart(padLen, '0');
+          autoRangeItems.push({
+            id: Math.random().toString(36).substring(2, 9),
+            number: numStr,
+            quantity: qty,
+            mode: modeToUse,
+            isBox: false,
+            unitPrice,
+            totalPrice: qty * unitPrice,
+          });
+        }
+        itemsToSubmit = [...itemsToSubmit, ...autoRangeItems];
+      } else if (!isRange && numberInput.trim()) {
+        // If single number is filled and not yet added to queue
+        const qty = parseInt(countInput, 10) || 1;
+        const cleanNum = numberInput.trim();
+        const requiredLen = digitGroup === '1' ? 1 : digitGroup === '2' ? 2 : 3;
+        const formattedNum = cleanNum.padStart(requiredLen, '0');
+        const targets = isSet ? getUniquePermutations(formattedNum) : [formattedNum];
+        const mainMode = digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A';
+        const mainUnitPrice = getModeUnitPrice(mainMode);
+        const boxUnitPrice = getModeUnitPrice('BOX');
+        const autoSingleItems: QueuedEntry[] = [];
 
-      for (const num of targets) {
-        autoSingleItems.push({
-          id: Math.random().toString(36).substring(2, 9),
-          number: num,
-          quantity: qty,
-          mode: mainMode,
-          isBox: false,
-          unitPrice: mainUnitPrice,
-          totalPrice: qty * mainUnitPrice,
-        });
-        if (digitGroup === '3' && boxCountInput.trim()) {
-          const bQty = parseInt(boxCountInput, 10) || qty;
+        for (const num of targets) {
           autoSingleItems.push({
             id: Math.random().toString(36).substring(2, 9),
             number: num,
-            quantity: bQty,
-            mode: 'BOX',
-            isBox: true,
-            unitPrice: boxUnitPrice,
-            totalPrice: bQty * boxUnitPrice,
+            quantity: qty,
+            mode: mainMode,
+            isBox: false,
+            unitPrice: mainUnitPrice,
+            totalPrice: qty * mainUnitPrice,
           });
+          if (digitGroup === '3' && boxCountInput.trim()) {
+            const bQty = parseInt(boxCountInput, 10) || qty;
+            autoSingleItems.push({
+              id: Math.random().toString(36).substring(2, 9),
+              number: num,
+              quantity: bQty,
+              mode: 'BOX',
+              isBox: true,
+              unitPrice: boxUnitPrice,
+              totalPrice: bQty * boxUnitPrice,
+            });
+          }
         }
+        itemsToSubmit = [...itemsToSubmit, ...autoSingleItems];
       }
-      itemsToSubmit = [...itemsToSubmit, ...autoSingleItems];
     }
 
     if (itemsToSubmit.length === 0) {
@@ -1604,20 +1606,20 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
               Paste WhatsApp text or customer tickets formatted like:
             </Text>
             <View style={styles.messageExampleBox}>
-              <Text style={styles.messageExampleText}>• 551-5-5  → 551, 5 SUPER, 5 BOX</Text>
-              <Text style={styles.messageExampleText}>• 551-2    → 551, 2 SUPER</Text>
-              <Text style={styles.messageExampleText}>• 24-2     → 24, 2 QTY</Text>
+              <Text style={styles.messageExampleText}>• 551-5-5  → 5 SUPER, 5 BOX</Text>
+              <Text style={styles.messageExampleText}>• 345-2-1  → 2 SUPER, 1 BOX</Text>
+              <Text style={styles.messageExampleText}>• 551-2    → 2 SUPER | 24-2 → 2 QTY</Text>
+              <Text style={styles.messageExampleText}>• Supports full WhatsApp messages with timestamps!</Text>
             </View>
 
             <TextInput
               style={styles.messageModalInput}
-              placeholder="Paste or type clipboard text here...&#10;e.g.&#10;551-5-5&#10;551-2&#10;24-2"
+              placeholder={'Paste WhatsApp messages here...\ne.g.\n551-5-5\n345-2-1\n456-3-2\n478-5-3 10:36 PM'}
               placeholderTextColor="#94A3B8"
               multiline
-              numberOfLines={4}
+              numberOfLines={5}
               value={messagePasteInput}
               onChangeText={setMessagePasteInput}
-              autoFocus
             />
 
             <View style={styles.messageModalButtonsRow}>
@@ -1655,7 +1657,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
                   applyParsedTickets(parsed);
                 }}
               >
-                <Text style={styles.messageModalApplyText}>Paste into Columns</Text>
+                <Text style={styles.messageModalApplyText}>Equate All Tickets</Text>
               </TouchableOpacity>
             </View>
           </View>
