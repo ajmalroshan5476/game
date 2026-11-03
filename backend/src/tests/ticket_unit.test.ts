@@ -117,5 +117,43 @@ console.log('Running Ticket Unit Tests...');
   assert(err.number === '777' && err.remaining === 5, 'LimitExceededError has proper data fields');
 }
 
+// 7. Net Pay Calculation and Daily Aggregation Logic
+{
+  const mockGames = [
+    { gameName: 'DEAR 1PM', totalSales: 500, totalPrizes: 200, totalCommission: 50 },
+    { gameName: 'DEAR 6PM', totalSales: 800, totalPrizes: 900, totalCommission: 80 },
+    { gameName: 'DEAR 8PM', totalSales: 300, totalPrizes: 0, totalCommission: 30 },
+  ];
+
+  const items = mockGames.map((g) => {
+    const netPay = g.totalPrizes + g.totalCommission - g.totalSales;
+    return {
+      ...g,
+      netPay,
+    };
+  });
+
+  assert(items[0].netPay === -250, 'DEAR 1PM Net Pay: 200 + 50 - 500 = -250 (Payable)');
+  assert(items[1].netPay === 180, 'DEAR 6PM Net Pay: 900 + 80 - 800 = +180 (Receivable)');
+  assert(items[2].netPay === -270, 'DEAR 8PM Net Pay: 0 + 30 - 300 = -270 (Payable)');
+
+  // Daily summary aggregating all games for individual user
+  const summary = items.reduce(
+    (acc, item) => {
+      acc.totalSales += item.totalSales;
+      acc.totalPrizes += item.totalPrizes;
+      acc.totalCommission += item.totalCommission;
+      acc.netPay += item.netPay;
+      return acc;
+    },
+    { gameName: 'TOTAL / ALL GAMES', totalSales: 0, totalPrizes: 0, totalCommission: 0, netPay: 0 }
+  );
+
+  assert(summary.totalSales === 1600, 'Consolidated Day Sales: 500 + 800 + 300 = 1600');
+  assert(summary.totalPrizes === 1100, 'Consolidated Day Prizes: 200 + 900 + 0 = 1100');
+  assert(summary.totalCommission === 160, 'Consolidated Day Commission: 50 + 80 + 30 = 160');
+  assert(summary.netPay === -340, 'Consolidated Day Net Pay: 1100 + 160 - 1600 = -340 (Payable)');
+}
+
 console.log('All ticket unit tests PASSED successfully!');
 

@@ -403,22 +403,30 @@ export class ReportService {
     let dateFilter = '';
     const params: any[] = [orgId];
 
-    const effectiveFrom = filters?.fromDate || (!filters?.toDate ? filters?.date : undefined);
-    const effectiveTo = filters?.toDate || (!filters?.fromDate ? filters?.date : undefined);
+    const effectiveFrom = filters?.fromDate || filters?.date;
+    const effectiveTo = filters?.toDate || filters?.date;
 
     if (effectiveFrom && effectiveFrom !== 'undefined') {
       params.push(effectiveFrom);
-      dateFilter += ` AND fl.created_at >= $${params.length}`;
+      dateFilter += ` AND COALESCE(d.draw_date, (fl.created_at AT TIME ZONE 'Asia/Kolkata')::date) >= $${params.length}::date`;
     }
     if (effectiveTo && effectiveTo !== 'undefined') {
-      params.push(`${effectiveTo} 23:59:59.999Z`);
-      dateFilter += ` AND fl.created_at <= $${params.length}`;
+      params.push(effectiveTo);
+      dateFilter += ` AND COALESCE(d.draw_date, (fl.created_at AT TIME ZONE 'Asia/Kolkata')::date) <= $${params.length}::date`;
     }
-    const effectiveUserId = filters?.targetUserId || userId;
-    if (effectiveUserId && effectiveUserId !== 'ALL' && effectiveUserId !== 'undefined') {
-      params.push(effectiveUserId);
+
+    // Individual user isolation: non-admin userId strictly enforced
+    const filterUserId = (userId && userId !== 'ALL' && userId !== 'undefined')
+      ? userId
+      : (filters?.targetUserId && filters.targetUserId !== 'ALL' && filters.targetUserId !== 'undefined')
+      ? filters.targetUserId
+      : undefined;
+
+    if (filterUserId) {
+      params.push(filterUserId);
       dateFilter += ` AND fl.user_id = $${params.length}`;
     }
+
     if (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
       params.push(filters.gameId);
       dateFilter += ` AND (g.id::text = $${params.length} OR g.code ILIKE $${params.length} OR g.name ILIKE $${params.length})`;

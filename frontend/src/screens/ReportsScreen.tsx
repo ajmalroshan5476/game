@@ -35,6 +35,7 @@ import {
   Edit3,
   History,
   AlertCircle,
+  Calendar,
 } from 'lucide-react-native';
 
 export type ReportType = 'sales' | 'winnings' | 'bill-wise' | 'number-wise' | 'net-pay' | 'ticket-history';
@@ -125,6 +126,22 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
     setToDate(fromDate);
   };
 
+  const handleSetToday = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setFromDate(today);
+    setToDate(today);
+    setSingleDate(today);
+  };
+
+  const handleSetYesterday = () => {
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    const yStr = y.toISOString().split('T')[0];
+    setFromDate(yStr);
+    setToDate(yStr);
+    setSingleDate(yStr);
+  };
+
   const getModeOptions = (grp: string) => {
     if (grp === '1') return ['ALL', 'A', 'B', 'C'];
     if (grp === '2') return ['ALL', 'AB', 'AC', 'BC'];
@@ -184,6 +201,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
       } else if (reportType === 'net-pay') {
         baseParams.fromDate = fromDate;
         baseParams.toDate = toDate;
+        baseParams.date = fromDate || singleDate;
         const res = await api.getNetPayReport(baseParams);
         setData(res);
       } else if (reportType === 'ticket-history') {
@@ -364,34 +382,32 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
         </View>
       </View>
 
-      {/* Sub-tab switcher to switch between the report screens (Visible when filters expanded) */}
-      {showFilters && (
-        <View style={styles.tabBar}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-            {[
-              { id: 'sales', label: 'Sales' },
-              { id: 'winnings', label: 'Winning' },
-              { id: 'bill-wise', label: 'Bill Wise' },
-              { id: 'number-wise', label: 'Number Wise' },
-              { id: 'net-pay', label: 'Net Pay' },
-              ...(isAdmin ? [{ id: 'ticket-history', label: 'Ticket History' }] : []),
-            ].map((t) => {
-              const active = reportType === t.id;
-              return (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[styles.tabItem, active && styles.tabItemActive]}
-                  onPress={() => setReportType(t.id as ReportType)}
-                >
-                  <Text style={[styles.tabItemText, active && styles.tabItemTextActive]}>
-                    {t.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
+      {/* Sub-tab switcher to switch between the report screens */}
+      <View style={styles.tabBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
+          {[
+            { id: 'sales', label: 'Sales' },
+            { id: 'winnings', label: 'Winning' },
+            { id: 'bill-wise', label: 'Bill Wise' },
+            { id: 'number-wise', label: 'Number Wise' },
+            { id: 'net-pay', label: 'Net Pay' },
+            ...(isAdmin ? [{ id: 'ticket-history', label: 'Ticket History' }] : []),
+          ].map((t) => {
+            const active = reportType === t.id;
+            return (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.tabItem, active && styles.tabItemActive]}
+                onPress={() => setReportType(t.id as ReportType)}
+              >
+                <Text style={[styles.tabItemText, active && styles.tabItemTextActive]}>
+                  {t.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* REPLICATED FILTER CARD (Exact layout from screenshots - toggleable) */}
@@ -482,6 +498,32 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
                 </View>
               </View>
             )}
+
+            {/* Quick Date Presets */}
+            <View style={styles.quickDateRow}>
+              <TouchableOpacity
+                style={[
+                  styles.quickDateBtn,
+                  fromDate === todayStr && toDate === todayStr && styles.quickDateBtnActive,
+                ]}
+                onPress={handleSetToday}
+              >
+                <Text
+                  style={[
+                    styles.quickDateBtnText,
+                    fromDate === todayStr && toDate === todayStr && styles.quickDateBtnTextActive,
+                  ]}
+                >
+                  Today
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickDateBtn}
+                onPress={handleSetYesterday}
+              >
+                <Text style={styles.quickDateBtnText}>Yesterday</Text>
+              </TouchableOpacity>
+            </View>
 
             {/* Row 3: Ticket Number (Optional) */}
             <Text style={styles.fieldLabel}>Ticket Number / Search</Text>
@@ -799,20 +841,74 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
 
                 return (
                   <View style={{ width: '100%' }}>
+                    {/* Quick Filter Bar for Net Pay */}
+                    <View style={styles.quickFilterBar}>
+                      <TouchableOpacity
+                        style={styles.quickFilterPill}
+                        onPress={() => setPickerType('ticket')}
+                      >
+                        <Text style={styles.quickFilterPillLabel}>GAME:</Text>
+                        <Text style={styles.quickFilterPillValue}>
+                          {selectedTicket === 'ALL'
+                            ? 'ALL GAMES'
+                            : games.find((g) => g.id === selectedTicket || g.name === selectedTicket)?.name || selectedTicket}
+                        </Text>
+                        <ChevronDown size={14} color="#007BFF" />
+                      </TouchableOpacity>
+
+                      <View style={styles.quickDateButtonGroup}>
+                        <TouchableOpacity
+                          style={[
+                            styles.quickDatePill,
+                            fromDate === todayStr && toDate === todayStr && styles.quickDatePillActive,
+                          ]}
+                          onPress={handleSetToday}
+                        >
+                          <Text
+                            style={[
+                              styles.quickDatePillText,
+                              fromDate === todayStr && toDate === todayStr && styles.quickDatePillTextActive,
+                            ]}
+                          >
+                            Today
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.quickDatePill}
+                          onPress={handleSetYesterday}
+                        >
+                          <Text style={styles.quickDatePillText}>Yesterday</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.quickDatePill}
+                          onPress={() => setShowFilters(true)}
+                        >
+                          <Calendar size={13} color="#475569" />
+                          <Text style={styles.quickDatePillText}>
+                            {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
                     {/* Prominent Daily Net Pay Tally Card */}
                     <View style={styles.netPayTallyCard}>
                       <View style={styles.netPayTallyHeader}>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.netPayTallyTitle}>
-                            {selectedTicket === 'ALL'
-                              ? 'DAILY NET PAY TALLY (ALL GAMES)'
-                              : `${selectedTicket} NET PAY TALLY`}
+                            {!isAdmin
+                              ? (selectedTicket === 'ALL' ? 'MY DAILY NET PAY (ALL GAMES)' : `${selectedTicket} NET PAY`)
+                              : (selectedTicket === 'ALL' ? 'DAILY NET PAY TALLY (ALL GAMES)' : `${selectedTicket} NET PAY TALLY`)}
                           </Text>
                           <Text style={styles.netPayTallySubtitle}>
                             Date: {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}
-                            {targetUserId !== 'ALL' && users.find((u) => u.id === targetUserId)
-                              ? ` • Seller: ${users.find((u) => u.id === targetUserId)?.username}`
-                              : ' • All Users'}
+                            {!isAdmin
+                              ? ` • User: ${user?.username || 'You'}`
+                              : (targetUserId !== 'ALL' && users.find((u) => u.id === targetUserId)
+                                ? ` • Seller: ${users.find((u) => u.id === targetUserId)?.username}`
+                                : ' • All Users')}
                           </Text>
                         </View>
                         <View
@@ -874,7 +970,14 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
                     </Text>
 
                     {netPayItems.length === 0 ? (
-                      <Text style={styles.noData}>No settlement transactions found for this date.</Text>
+                      <View style={styles.noDataBox}>
+                        <Text style={styles.noData}>
+                          No settlement transactions found for {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}.
+                        </Text>
+                        <Text style={styles.noDataSub}>
+                          Select another date or game using the controls above.
+                        </Text>
+                      </View>
                     ) : (
                       <View style={styles.excelTableContainer}>
                         <View style={styles.excelTableHeader}>
@@ -1847,6 +1950,110 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: '#0F172A',
+  },
+  // QUICK FILTER BAR STYLES FOR NET PAY
+  quickFilterBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 4,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  quickFilterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  quickFilterPillLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#1D4ED8',
+    letterSpacing: 0.5,
+  },
+  quickFilterPillValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E3A8A',
+  },
+  quickDateButtonGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  quickDatePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  quickDatePillActive: {
+    backgroundColor: '#007BFF',
+    borderColor: '#007BFF',
+  },
+  quickDatePillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  quickDatePillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  quickDateRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  quickDateBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  quickDateBtnActive: {
+    backgroundColor: '#007BFF',
+    borderColor: '#007BFF',
+  },
+  quickDateBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  quickDateBtnTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  noDataBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    padding: 24,
+    marginHorizontal: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  noDataSub: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginTop: 6,
+    textAlign: 'center',
   },
   // TICKET HISTORY STYLES
   filterMetaPill: {

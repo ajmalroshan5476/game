@@ -587,9 +587,14 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/net-pay', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
+    const effectiveUserId = role === 'ADMIN' ? (queryParams.targetUserId || queryParams.userId || 'ALL') : userId;
 
-    return await ReportService.getNetPayReport(orgId, effectiveUserId, queryParams);
+    const safeFilters = {
+      ...queryParams,
+      targetUserId: role === 'ADMIN' ? (queryParams.targetUserId || queryParams.userId) : userId,
+    };
+
+    return await ReportService.getNetPayReport(orgId, effectiveUserId, safeFilters);
   });
 
   // --------------------------------------------------------------------------
