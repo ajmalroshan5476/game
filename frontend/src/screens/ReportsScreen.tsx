@@ -2158,4 +2158,73 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1F2937',
   },
+  billGameBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: '#2563EB',
+    marginBottom: 4,
+  },
+  billGameBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  statusBadgeActive: {
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  statusBadgeCancelled: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  billCustomerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  billCustomerLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  billCustomerName: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  billTableHead: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+  billColHead: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  billColCell: {
+    fontSize: 12,
+    color: '#334155',
+  },
+  billCellBold: {
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  billFooterMeta: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  billFooterTotal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#00A86B',
+    marginTop: 2,
+  },
 });

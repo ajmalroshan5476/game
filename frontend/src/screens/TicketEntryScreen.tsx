@@ -16,6 +16,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { api } from '../api/client';
 import { colors } from '../theme/colors';
+import { useAuth } from '../context/AuthContext';
 import {
   Check,
   ChevronRight,
@@ -30,6 +31,10 @@ import {
   ArrowLeft,
   Clock,
   X,
+  ClipboardPaste,
+  Users,
+  ChevronDown,
+  User,
 } from 'lucide-react-native';
 import { EditTicketModal } from '../components/EditTicketModal';
 
@@ -64,45 +69,51 @@ export interface ParsedTicketEntry {
  * - 551-2    => Number 551, Count 2 (SUPER)
  * - 24-2     => Number 24, Count 2 (AB)
  * - 7-5      => Number 7, Count 5 (A)
- * Also supports multi-line text from WhatsApp / SMS.
+ * Also supports 551:5:5, 551,5,5, space-separated (551 5 5), and multi-line text from WhatsApp / SMS.
  */
 export function parseClipboardTicketData(text: string): ParsedTicketEntry[] {
   if (!text || typeof text !== 'string') return [];
   const results: ParsedTicketEntry[] = [];
-  const lines = text.split(/[\r\n,;]+/);
+  const lines = text.split(/[\r\n]+/);
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
 
-    // Pattern 1: 3-part match (e.g. 551-5-5 or 551:5:5 or 551/5/5 or 551 5 5)
-    const matchThree = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\s*[-:=/]\s*(\d+)\b/);
-    if (matchThree) {
-      const num = matchThree[1];
-      const count = parseInt(matchThree[2], 10);
-      const box = parseInt(matchThree[3], 10);
+    // Pattern 1: match 3-part or 2-part patterns with hyphens, colons, slashes, or commas
+    // e.g. 551-5-5, 551-2, 24-2, 551:5:5, 551,5,5
+    const regex = /\b(\d{1,3})\s*[-:=/,]\s*(\d+)(?:\s*[-:=/,]\s*(\d+))?\b/g;
+    let match;
+    let found = false;
+    while ((match = regex.exec(line)) !== null) {
+      found = true;
+      const num = match[1];
+      const count = parseInt(match[2], 10);
+      const box = match[3] ? parseInt(match[3], 10) : undefined;
       const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
       results.push({
         number: num,
         count: isNaN(count) || count <= 0 ? 1 : count,
-        boxCount: isNaN(box) || box <= 0 ? undefined : box,
+        boxCount: box !== undefined && !isNaN(box) && box > 0 ? box : undefined,
         digitGroup: dGroup,
       });
-      continue;
     }
 
-    // Pattern 2: 2-part match (e.g. 551-2 or 24-2 or 4-5)
-    const matchTwo = line.match(/\b(\d{1,3})\s*[-:=/]\s*(\d+)\b/);
-    if (matchTwo) {
-      const num = matchTwo[1];
-      const count = parseInt(matchTwo[2], 10);
-      const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
-      results.push({
-        number: num,
-        count: isNaN(count) || count <= 0 ? 1 : count,
-        boxCount: undefined,
-        digitGroup: dGroup,
-      });
+    if (!found) {
+      // Pattern 2: space-separated fallback (e.g. 551 5 5 or 551 2 or 24 2)
+      const spaceMatch = line.match(/\b(\d{1,3})\s+(\d+)(?:\s+(\d+))?\b/);
+      if (spaceMatch) {
+        const num = spaceMatch[1];
+        const count = parseInt(spaceMatch[2], 10);
+        const box = spaceMatch[3] ? parseInt(spaceMatch[3], 10) : undefined;
+        const dGroup: '1' | '2' | '3' = num.length === 1 ? '1' : num.length === 2 ? '2' : '3';
+        results.push({
+          number: num,
+          count: isNaN(count) || count <= 0 ? 1 : count,
+          boxCount: box !== undefined && !isNaN(box) && box > 0 ? box : undefined,
+          digitGroup: dGroup,
+        });
+      }
     }
   }
 
@@ -132,6 +143,14 @@ function getUniquePermutations(str: string): string[] {
 }
 
 export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
+  // Admin User/Seller selection
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [targetUserId, setTargetUserId] = useState<string>(''); // '' means Admin Self
+  const [userPickerModalVisible, setUserPickerModalVisible] = useState(false);
+
   // Games & Draws
   const [games, setGames] = useState<any[]>([]);
   const [selectedGame, setSelectedGame] = useState<any>(null);
@@ -165,9 +184,9 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
   const [customerName, setCustomerName] = useState('');
 
   // Focus refs for automatic pointer advance (Number -> Qty -> Box)
-  const numberInputRef = useRef<TextInput>(null);
-  const countInputRef = useRef<TextInput>(null);
-  const boxInputRef = useRef<TextInput>(null);
+  const numberInputRef = useRef<any>(null);
+  const countInputRef = useRef<any>(null);
+  const boxInputRef = useRef<any>(null);
 
   // Message Paste Modal (WhatsApp / Clipboard modal)
   const [messageModalVisible, setMessageModalVisible] = useState(false);
@@ -204,14 +223,69 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
   // Load games and individual user ticket pricing
   useEffect(() => {
     loadGames();
+    if (isAdmin) {
+      loadAdminUsers();
+    }
     loadUserPricing();
-  }, []);
+  }, [isAdmin]);
+
+  const loadAdminUsers = async () => {
+    try {
+      const res = await api.getUsers();
+      setUsersList(res.users || []);
+    } catch (err) {
+      console.warn('Could not load users for admin ticket entry', err);
+    }
+  };
 
   const loadUserPricing = async () => {
     try {
       const res = await api.getMyPrices();
       setUserPrices(res.prices || []);
     } catch {}
+  };
+
+  const handleSelectTargetUser = async (uId: string) => {
+    setTargetUserId(uId);
+    setUserPickerModalVisible(false);
+    try {
+      let newPrices: any[] = [];
+      if (uId && uId !== user?.id) {
+        const pRes = await api.getUserPrices(uId);
+        newPrices = pRes.prices || [];
+      } else {
+        const pRes = await api.getMyPrices();
+        newPrices = pRes.prices || [];
+      }
+      setUserPrices(newPrices);
+
+      // Re-calculate prices for already queued entries with new user pricing
+      if (entries.length > 0) {
+        setEntries((prev) =>
+          prev.map((e) => {
+            const specific = selectedGame?.id
+              ? newPrices.find((p) => p.gameId === selectedGame.id && p.mode === e.mode)
+              : null;
+            const globalRate = newPrices.find((p) => !p.gameId && p.mode === e.mode);
+            const unitPrice =
+              specific && !isNaN(Number(specific.price))
+                ? Number(specific.price)
+                : globalRate && !isNaN(Number(globalRate.price))
+                ? Number(globalRate.price)
+                : ['A', 'B', 'C'].includes(e.mode)
+                ? 12
+                : 10;
+            return {
+              ...e,
+              unitPrice,
+              totalPrice: e.quantity * unitPrice,
+            };
+          })
+        );
+      }
+    } catch (err) {
+      console.warn('Could not load user pricing', err);
+    }
   };
 
   const getModeUnitPrice = (mode: string) => {
@@ -651,6 +725,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
       const payload = {
         drawId: selectedDraw.id,
         customerName: customerName.trim() || undefined,
+        targetUserId: isAdmin && targetUserId ? targetUserId : undefined,
         entries: itemsToSubmit.map((e) => ({
           number: e.number,
           quantity: e.quantity,
@@ -661,6 +736,9 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
       };
 
       const result = await api.submitTicket(payload);
+      if (isAdmin && targetUserId && !result.bookedFor) {
+        result.bookedFor = usersList.find((u) => u.id === targetUserId)?.username;
+      }
       setConfirmedTicket(result);
       setLastEnteredTicket(result);
       setEntries([]);
@@ -753,7 +831,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
 
       const qty = parseInt(countInput, 10) || 1;
       const padLen = digitGroup === '1' ? 1 : digitGroup === '2' ? 2 : 3;
-      const unitPrice = digitGroup === '1' ? 12 : 10;
+      const modeToUse = digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A';
+      const unitPrice = getModeUnitPrice(modeToUse);
       const autoRangeItems: QueuedEntry[] = [];
 
       for (let i = s; i <= e; i++) {
@@ -762,7 +841,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
           id: Math.random().toString(36).substring(2, 9),
           number: numStr,
           quantity: qty,
-          mode: digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A',
+          mode: modeToUse,
           isBox: false,
           unitPrice,
           totalPrice: qty * unitPrice,
@@ -776,7 +855,9 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
       const requiredLen = digitGroup === '1' ? 1 : digitGroup === '2' ? 2 : 3;
       const formattedNum = cleanNum.padStart(requiredLen, '0');
       const targets = isSet ? getUniquePermutations(formattedNum) : [formattedNum];
-      const unitPrice = digitGroup === '1' ? 12 : 10;
+      const mainMode = digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A';
+      const mainUnitPrice = getModeUnitPrice(mainMode);
+      const boxUnitPrice = getModeUnitPrice('BOX');
       const autoSingleItems: QueuedEntry[] = [];
 
       for (const num of targets) {
@@ -784,10 +865,10 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
           id: Math.random().toString(36).substring(2, 9),
           number: num,
           quantity: qty,
-          mode: digitGroup === '3' ? 'SUPER' : digitGroup === '2' ? 'AB' : 'A',
+          mode: mainMode,
           isBox: false,
-          unitPrice,
-          totalPrice: qty * unitPrice,
+          unitPrice: mainUnitPrice,
+          totalPrice: qty * mainUnitPrice,
         });
         if (digitGroup === '3' && boxCountInput.trim()) {
           const bQty = parseInt(boxCountInput, 10) || qty;
@@ -797,8 +878,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             quantity: bQty,
             mode: 'BOX',
             isBox: true,
-            unitPrice,
-            totalPrice: bQty * unitPrice,
+            unitPrice: boxUnitPrice,
+            totalPrice: bQty * boxUnitPrice,
           });
         }
       }
@@ -902,6 +983,26 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
           </View>
         )}
 
+        {/* ADMIN USER SELECTOR ROW (Book in the name of a user under admin) */}
+        {isAdmin && (
+          <View style={styles.adminUserSelectorRow}>
+            <Text style={styles.adminUserSelectorLabel}>Seller / User:</Text>
+            <TouchableOpacity
+              style={styles.adminUserSelectorPill}
+              activeOpacity={0.8}
+              onPress={() => setUserPickerModalVisible(true)}
+            >
+              <Users size={15} color="#00A86B" />
+              <Text style={styles.adminUserSelectorText} numberOfLines={1}>
+                {targetUserId && usersList.find((u) => u.id === targetUserId)
+                  ? `${usersList.find((u) => u.id === targetUserId)?.username} (${usersList.find((u) => u.id === targetUserId)?.role || 'USER'})`
+                  : `Admin (Self: ${user?.username || 'Admin'})`}
+              </Text>
+              <ChevronDown size={15} color="#00A86B" />
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Row 2: Checkboxes [✓] Range  [ ] Set  [ ] 100  [ ] 111 matching screenshot */}
         <View style={styles.checkboxesRow}>
           <TouchableOpacity
@@ -950,8 +1051,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
         </View>
 
         {/* Row 3: Inputs:
-            If Range is checked: [ Start ] [ End ] [ Count ]
-            If Range is not checked: [ Number ] [ Count ] [ Box ] */}
+            If Range is checked: [ Start ] [ End ] [ Count ] [ PASTE ]
+            If Range is not checked: [ Number ] [ Count ] [ Box ] [ PASTE ] */}
         {isRange ? (
           <View style={styles.inputsRow}>
             <TextInput
@@ -978,13 +1079,21 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
               value={countInput}
               onChangeText={setCountInput}
             />
+            <TouchableOpacity
+              style={styles.quickPasteColBtn}
+              activeOpacity={0.8}
+              onPress={handleMessageButtonClick}
+            >
+              <ClipboardPaste size={15} color="#00A86B" strokeWidth={2.5} />
+              <Text style={styles.quickPasteColBtnText}>PASTE</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.inputsRow}>
             {/* Number Input */}
             <TextInput
               ref={numberInputRef}
-              style={[styles.inputBox, { flex: digitGroup === '3' ? 1.2 : 1 }]}
+              style={[styles.inputBox, { flex: digitGroup === '3' ? 1.15 : 1.3 }]}
               placeholder="Number"
               placeholderTextColor="#94A3B8"
               keyboardType="numeric"
@@ -1029,6 +1138,16 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
                 }}
               />
             )}
+
+            {/* Dedicated PASTE Button */}
+            <TouchableOpacity
+              style={styles.quickPasteColBtn}
+              activeOpacity={0.8}
+              onPress={handleMessageButtonClick}
+            >
+              <ClipboardPaste size={15} color="#00A86B" strokeWidth={2.5} />
+              <Text style={styles.quickPasteColBtnText}>PASTE</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -1291,8 +1410,8 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             onPress={handleMessageButtonClick}
           >
             <View style={styles.btnIconRow}>
-              <MessageCircle size={16} color="#FFFFFF" />
-              <Text style={styles.bottomBtnText}>Message</Text>
+              <ClipboardPaste size={16} color="#FFFFFF" strokeWidth={2.5} />
+              <Text style={styles.bottomBtnText}>Paste / Msg</Text>
             </View>
           </TouchableOpacity>
 
@@ -1387,6 +1506,14 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
               <View style={styles.receiptMetaRow}>
                 <Text style={styles.receiptMetaLabel}>Customer:</Text>
                 <Text style={styles.receiptMetaVal}>{confirmedTicket.customer_name}</Text>
+              </View>
+            )}
+            {confirmedTicket?.bookedFor && (
+              <View style={styles.receiptMetaRow}>
+                <Text style={styles.receiptMetaLabel}>Booked For:</Text>
+                <Text style={[styles.receiptMetaVal, { color: '#2563EB', fontWeight: '800' }]}>
+                  {confirmedTicket.bookedFor}
+                </Text>
               </View>
             )}
 
@@ -1511,6 +1638,24 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
               </TouchableOpacity>
 
               <TouchableOpacity
+                style={styles.messageModalReadClipBtn}
+                onPress={async () => {
+                  try {
+                    let text = await Clipboard.getStringAsync();
+                    if (!text && typeof navigator !== 'undefined' && (navigator as any).clipboard) {
+                      try {
+                        text = await (navigator as any).clipboard.readText();
+                      } catch {}
+                    }
+                    if (text) setMessagePasteInput(text);
+                  } catch {}
+                }}
+              >
+                <ClipboardPaste size={15} color="#0369A1" />
+                <Text style={styles.messageModalReadClipText}>Read Clip</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={styles.messageModalApplyBtn}
                 onPress={() => {
                   if (!messagePasteInput.trim()) {
@@ -1532,6 +1677,85 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
           </View>
         </View>
       </Modal>
+
+      {/* ADMIN USER PICKER MODAL */}
+      <Modal
+        visible={userPickerModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUserPickerModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setUserPickerModalVisible(false)}
+        >
+          <View style={styles.userPickerModalCard}>
+            <View style={styles.userPickerModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Users size={20} color="#00A86B" />
+                <Text style={styles.userPickerModalTitle}>Select Seller / User</Text>
+              </View>
+              <TouchableOpacity onPress={() => setUserPickerModalVisible(false)}>
+                <X size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.userPickerModalSubtitle}>
+              Select a user under admin to book tickets and apply rates in their name:
+            </Text>
+
+            <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false}>
+              {/* Option 1: Admin Self */}
+              <TouchableOpacity
+                style={[
+                  styles.userPickerOption,
+                  (!targetUserId || targetUserId === user?.id) && styles.userPickerOptionSelected,
+                ]}
+                onPress={() => handleSelectTargetUser('')}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.userPickerOptionTitle}>
+                    Admin (Self: {user?.username})
+                  </Text>
+                  <Text style={styles.userPickerOptionSub}>
+                    Direct admin entry (admin account & pricing)
+                  </Text>
+                </View>
+                {(!targetUserId || targetUserId === user?.id) && (
+                  <Check size={18} color="#00A86B" strokeWidth={2.5} />
+                )}
+              </TouchableOpacity>
+
+              {/* Option 2+: Users under Admin */}
+              {usersList.map((u) => {
+                const isSelected = targetUserId === u.id;
+                return (
+                  <TouchableOpacity
+                    key={u.id}
+                    style={[
+                      styles.userPickerOption,
+                      isSelected && styles.userPickerOptionSelected,
+                    ]}
+                    onPress={() => handleSelectTargetUser(u.id)}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.userPickerOptionTitle}>
+                        {u.username} {u.name ? `• ${u.name}` : ''}
+                      </Text>
+                      <Text style={styles.userPickerOptionSub}>
+                        Role: {u.role || 'USER'} {u.phone ? `• ${u.phone}` : ''}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Check size={18} color="#00A86B" strokeWidth={2.5} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1540,19 +1764,20 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#00A86B',
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ? StatusBar.currentHeight + 14 : 36) : 12,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ? StatusBar.currentHeight + 28 : 52) : 36,
   },
   topControlContainer: {
     backgroundColor: '#00A86B',
     paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 14,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
   topHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 10,
+    marginTop: 6,
+    marginBottom: 12,
   },
   headerBackBtn: {
     width: 40,
@@ -1703,10 +1928,63 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
+  adminUserSelectorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 12,
+  },
+  adminUserSelectorLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  adminUserSelectorPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  adminUserSelectorText: {
+    flex: 1,
+    marginHorizontal: 6,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
   inputsRow: {
     flexDirection: 'row',
     gap: 8,
     marginBottom: 10,
+  },
+  quickPasteColBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    height: 46,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  quickPasteColBtnText: {
+    color: '#00A86B',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   inputBox: {
     backgroundColor: '#FFFFFF',
@@ -2222,5 +2500,74 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: '#FFFFFF',
+  },
+  messageModalReadClipBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 4,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messageModalReadClipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0369A1',
+  },
+  userPickerModalCard: {
+    width: '90%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 10 },
+      android: { elevation: 6 },
+    }),
+  },
+  userPickerModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  userPickerModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  userPickerModalSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 12,
+  },
+  userPickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  userPickerOptionSelected: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#86EFAC',
+  },
+  userPickerOptionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  userPickerOptionSub: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#64748B',
+    marginTop: 2,
   },
 });

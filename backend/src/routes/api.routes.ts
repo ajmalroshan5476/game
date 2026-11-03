@@ -272,7 +272,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   // 3. Ticket Operations (Submit, Search, Cancel)
   // --------------------------------------------------------------------------
   fastify.post('/api/tickets', { preHandler: authenticate }, async (req, reply) => {
-    const { orgId, userId } = req.user!;
+    const { orgId, userId, role } = req.user!;
     const payload = req.body as any;
 
     if (!payload?.drawId || !Array.isArray(payload.entries) || payload.entries.length === 0) {
@@ -280,7 +280,18 @@ export async function apiRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      const result = await TicketService.submitTicket(orgId, userId, payload);
+      const effectiveUserId =
+        role === 'ADMIN' && payload?.targetUserId && payload.targetUserId !== 'ALL'
+          ? payload.targetUserId
+          : userId;
+
+      const result = await TicketService.submitTicket(orgId, effectiveUserId, payload);
+      if (effectiveUserId !== userId) {
+        const uRes = await query('SELECT username FROM users WHERE id = $1', [effectiveUserId]);
+        if (uRes.rows[0]) {
+          (result as any).bookedFor = uRes.rows[0].username;
+        }
+      }
       return reply.status(201).send(result);
     } catch (err: any) {
       if (err instanceof LimitExceededError) {

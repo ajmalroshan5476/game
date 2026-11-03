@@ -86,7 +86,7 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
 
   // 30 Fixed Slots for 6th Prize (Consolations)
   const [sixthSlots, setSixthSlots] = useState<string[]>(() => Array(30).fill(''));
-  const slotRefs = useRef<(TextInput | null)[]>([]);
+  const slotRefs = useRef<(any | null)[]>([]);
 
   const syncSlotsFromList = (list: string[]) => {
     const next = Array(30).fill('');
