@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -251,7 +251,7 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
     }
   };
 
-  const handleToggleStatus = async (user: any) => {
+  const handleToggleStatus = useCallback(async (user: any) => {
     const nextStatus = user.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
     try {
       await api.updateUserStatus(user.id, nextStatus);
@@ -259,7 +259,146 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
     } catch (err: any) {
       Alert.alert('Status Error', err.message || 'Failed to update user status');
     }
-  };
+  }, []);
+
+
+  interface UserCardItemProps {
+    user: any;
+    onToggleStatus: (u: any) => void;
+    onOpenPriceModal: (u: any) => void;
+    onSelectResetPassUser: (u: any) => void;
+  }
+
+  const UserCardItem: React.FC<UserCardItemProps> = React.memo(({
+    user: u,
+    onToggleStatus,
+    onOpenPriceModal,
+    onSelectResetPassUser,
+  }) => {
+    const isActive = u.status === 'ACTIVE';
+    const joinedDate = useMemo(() => new Date(u.created_at).toLocaleDateString('en-IN'), [u.created_at]);
+
+    const userRates = useMemo(() => {
+      const defaultRates: Record<string, string> = {
+        SUPER: '10',
+        BOX: '10',
+        AB: '10',
+        BC: '10',
+        AC: '10',
+        A: '12',
+        B: '12',
+        C: '12',
+      };
+      const rates = { ...defaultRates };
+      if (Array.isArray(u.ticket_prices)) {
+        for (const tp of u.ticket_prices) {
+          if (!tp.game_id || tp.game_id === 'ALL') {
+            rates[tp.mode] = parseFloat(tp.price).toFixed(0);
+          }
+        }
+      }
+      return rates;
+    }, [u.ticket_prices]);
+
+    return (
+      <View key={u.id} style={styles.userCard}>
+        <View style={styles.userCardTop}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={styles.userAvatar}>
+              <Text style={styles.userAvatarText}>{u.username.substring(0, 2)}</Text>
+            </View>
+            <View>
+              <Text style={styles.usernameText}>Agent {u.username}</Text>
+              <Text style={styles.userDateText}>Joined {joinedDate}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.statusPill,
+              isActive ? styles.statusActive : styles.statusSuspended,
+            ]}
+            onPress={() => onToggleStatus(u)}
+          >
+            <Text
+              style={[
+                styles.statusPillText,
+                { color: isActive ? colors.emeraldDark : colors.danger },
+              ]}
+            >
+              {u.status}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Ticket Pricing Card for this Agent */}
+        <View style={styles.userPricingCard}>
+          <View style={styles.userPricingHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Coins size={14} color="#059669" />
+              <Text style={styles.userPricingTitle}>Ticket Pricing Card</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.editPricePillBtn}
+              onPress={() => onOpenPriceModal(u)}
+            >
+              <Text style={styles.editPricePillText}>Edit Rates</Text>
+              <ChevronRight size={13} color="#059669" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.userPricingGrid}>
+            <View style={styles.userPriceTag}>
+              <Text style={styles.userPriceTagLabel}>SUPER</Text>
+              <Text style={styles.userPriceTagVal}>₹{userRates.SUPER}</Text>
+            </View>
+            <View style={styles.userPriceTag}>
+              <Text style={styles.userPriceTagLabel}>BOX</Text>
+              <Text style={styles.userPriceTagVal}>₹{userRates.BOX}</Text>
+            </View>
+            <View style={styles.userPriceTag}>
+              <Text style={styles.userPriceTagLabel}>AB/BC/AC</Text>
+              <Text style={styles.userPriceTagVal}>₹{userRates.AB}</Text>
+            </View>
+            <View style={styles.userPriceTag}>
+              <Text style={styles.userPriceTagLabel}>A / B / C</Text>
+              <Text style={styles.userPriceTagVal}>₹{userRates.A}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Sales stats and actions */}
+        <View style={styles.statsRow}>
+          <View style={styles.statBlock}>
+            <Text style={styles.statLabel}>Tickets Sold</Text>
+            <Text style={styles.statVal}>{u.ticket_count || 0}</Text>
+          </View>
+          <View style={styles.statBlock}>
+            <Text style={styles.statLabel}>Total Sales</Text>
+            <Text style={[styles.statVal, { color: colors.emeraldDark }]}>
+              ₹{u.total_sales || 0}
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <TouchableOpacity
+              style={styles.pricesBtn}
+              onPress={() => onOpenPriceModal(u)}
+            >
+              <Coins size={14} color="#059669" />
+              <Text style={styles.pricesBtnText}>Custom Pricing</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.resetPassBtn}
+              onPress={() => onSelectResetPassUser(u)}
+            >
+              <KeyRound size={14} color="#2563EB" />
+              <Text style={styles.resetPassText}>Pass</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  });
 
   const handleResetPassword = async () => {
     if (!selectedUser || !resetPassValue || resetPassValue.length < 6) {
@@ -305,132 +444,15 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
         ) : users.length === 0 ? (
           <Text style={styles.emptyText}>No users created yet.</Text>
         ) : (
-          users.map((u) => {
-            const isActive = u.status === 'ACTIVE';
-            return (
-              <View key={u.id} style={styles.userCard}>
-                <View style={styles.userCardTop}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                    <View style={styles.userAvatar}>
-                      <Text style={styles.userAvatarText}>{u.username.substring(0, 2)}</Text>
-                    </View>
-                    <View>
-                      <Text style={styles.usernameText}>Agent {u.username}</Text>
-                      <Text style={styles.userDateText}>
-                        Joined {new Date(u.created_at).toLocaleDateString('en-IN')}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.statusPill,
-                      isActive ? styles.statusActive : styles.statusSuspended,
-                    ]}
-                    onPress={() => handleToggleStatus(u)}
-                  >
-                    <Text
-                      style={[
-                        styles.statusPillText,
-                        { color: isActive ? colors.emeraldDark : colors.danger },
-                      ]}
-                    >
-                      {u.status}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Ticket Pricing Card for this Agent */}
-                {(() => {
-                  const defaultRates: Record<string, string> = {
-                    SUPER: '10',
-                    BOX: '10',
-                    AB: '10',
-                    BC: '10',
-                    AC: '10',
-                    A: '12',
-                    B: '12',
-                    C: '12',
-                  };
-                  const userRates = { ...defaultRates };
-                  if (Array.isArray(u.ticket_prices)) {
-                    for (const tp of u.ticket_prices) {
-                      if (!tp.game_id || tp.game_id === 'ALL') {
-                        userRates[tp.mode] = parseFloat(tp.price).toFixed(0);
-                      }
-                    }
-                  }
-
-                  return (
-                    <View style={styles.userPricingCard}>
-                      <View style={styles.userPricingHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Coins size={14} color="#059669" />
-                          <Text style={styles.userPricingTitle}>Ticket Pricing Card</Text>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.editPricePillBtn}
-                          onPress={() => openPriceEditModal(u)}
-                        >
-                          <Text style={styles.editPricePillText}>Edit Rates</Text>
-                          <ChevronRight size={13} color="#059669" />
-                        </TouchableOpacity>
-                      </View>
-
-                      <View style={styles.userPricingGrid}>
-                        <View style={styles.userPriceTag}>
-                          <Text style={styles.userPriceTagLabel}>SUPER</Text>
-                          <Text style={styles.userPriceTagVal}>₹{userRates.SUPER}</Text>
-                        </View>
-                        <View style={styles.userPriceTag}>
-                          <Text style={styles.userPriceTagLabel}>BOX</Text>
-                          <Text style={styles.userPriceTagVal}>₹{userRates.BOX}</Text>
-                        </View>
-                        <View style={styles.userPriceTag}>
-                          <Text style={styles.userPriceTagLabel}>AB/BC/AC</Text>
-                          <Text style={styles.userPriceTagVal}>₹{userRates.AB}</Text>
-                        </View>
-                        <View style={styles.userPriceTag}>
-                          <Text style={styles.userPriceTagLabel}>A / B / C</Text>
-                          <Text style={styles.userPriceTagVal}>₹{userRates.A}</Text>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })()}
-
-                {/* Sales stats and actions */}
-                <View style={styles.statsRow}>
-                  <View style={styles.statBlock}>
-                    <Text style={styles.statLabel}>Tickets Sold</Text>
-                    <Text style={styles.statVal}>{u.ticket_count || 0}</Text>
-                  </View>
-                  <View style={styles.statBlock}>
-                    <Text style={styles.statLabel}>Total Sales</Text>
-                    <Text style={[styles.statVal, { color: colors.emeraldDark }]}>
-                      ₹{u.total_sales || 0}
-                    </Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', gap: 6 }}>
-                    <TouchableOpacity
-                      style={styles.pricesBtn}
-                      onPress={() => openPriceEditModal(u)}
-                    >
-                      <Coins size={14} color="#059669" />
-                      <Text style={styles.pricesBtnText}>Custom Pricing</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.resetPassBtn}
-                      onPress={() => setSelectedUser(u)}
-                    >
-                      <KeyRound size={14} color="#2563EB" />
-                      <Text style={styles.resetPassText}>Pass</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            );
-          })
+          users.map((u) => (
+            <UserCardItem
+              key={u.id}
+              user={u}
+              onToggleStatus={handleToggleStatus}
+              onOpenPriceModal={openPriceEditModal}
+              onSelectResetPassUser={setSelectedUser}
+            />
+          ))
         )}
       </ScrollView>
 

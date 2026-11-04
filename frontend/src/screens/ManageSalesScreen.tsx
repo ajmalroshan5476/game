@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -277,6 +277,114 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
     return `${prefix}-${drawNum}`;
   };
 
+  interface ManageSalesBillCardProps {
+    item: any;
+    idx: number;
+    cancellingTicketNum: string | null;
+    onEditBill: (bill: any) => void;
+    onDeleteBill: (bill: any) => void;
+  }
+
+  const ManageSalesBillCard: React.FC<ManageSalesBillCardProps> = React.memo(({
+    item,
+    idx,
+    cancellingTicketNum,
+    onEditBill,
+    onDeleteBill,
+  }) => {
+    const billGame = useMemo(() => formatBillGame(item), [item]);
+    const billTime = useMemo(() => formatBillTime(item.created_at), [item.created_at]);
+    const billDate = useMemo(() => formatBillDate(item.draw_date, item.created_at), [item.draw_date, item.created_at]);
+    const totalPriceStr = useMemo(() => parseFloat(item.total_amount || 0).toFixed(2), [item.total_amount]);
+    const sortedEntries = useMemo(() => getSortedEntries(item.entries), [item.entries]);
+
+    return (
+      <View key={item.id || idx}>
+        {idx > 0 && <View style={styles.billDivider} />}
+        <View style={styles.billDetailedContainer}>
+          {/* Screenshot Blue Header Bar */}
+          <View style={styles.billBlueHeader}>
+            {/* Left Column */}
+            <View style={{ flex: 1.2 }}>
+              <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
+              <Text style={styles.billHeaderTime}>{billTime}</Text>
+            </View>
+
+            {/* Center Column */}
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text style={styles.billHeaderGame}>{billGame}</Text>
+              <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
+            </View>
+
+            {/* Right Column */}
+            <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+              <Text style={styles.billHeaderDate}>{billDate}</Text>
+              <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
+              <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
+            </View>
+          </View>
+
+          {/* Screenshot Table Rows */}
+          <View style={styles.billTable}>
+            {sortedEntries.length === 0 ? (
+              <View style={styles.billTableRow}>
+                <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
+                  No entries recorded for this bill
+                </Text>
+              </View>
+            ) : (
+              sortedEntries.map((entry: any, eIdx: number) => {
+                const catLabel = formatEntryCategory(entry, item);
+                const entryPrice = entry.total_price
+                  ? parseFloat(entry.total_price).toFixed(2)
+                  : entry.unit_price
+                  ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
+                  : (entry.quantity * 10).toFixed(2);
+
+                return (
+                  <View key={eIdx} style={styles.billTableRow}>
+                    <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
+                    <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
+                    <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
+                    <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
+                  </View>
+                );
+              })
+            )}
+          </View>
+
+          {/* Actions Bar: Edit and Delete Bill within time limit */}
+          <View style={styles.billActionRow}>
+            <TouchableOpacity
+              style={styles.billActionBtnEdit}
+              onPress={() => onEditBill(item)}
+              activeOpacity={0.8}
+            >
+              <Edit3 size={13} color="#2563EB" />
+              <Text style={styles.billActionTextEdit}>Edit Bill</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.billActionBtnDelete}
+              onPress={() => onDeleteBill(item)}
+              disabled={cancellingTicketNum === item.ticket_number}
+              activeOpacity={0.8}
+            >
+              {cancellingTicketNum === item.ticket_number ? (
+                <ActivityIndicator size="small" color="#DC2626" />
+              ) : (
+                <>
+                  <Trash2 size={13} color="#DC2626" />
+                  <Text style={styles.billActionTextDelete}>Delete Bill</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  });
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -434,99 +542,16 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
             <Text style={styles.noData}>No sales tickets found for the selected filters.</Text>
           </View>
         ) : (
-          salesData.items.map((item: any, idx: number) => {
-            const billGame = formatBillGame(item);
-            const billTime = formatBillTime(item.created_at);
-            const billDate = formatBillDate(item.draw_date, item.created_at);
-            const totalPriceStr = parseFloat(item.total_amount || 0).toFixed(2);
-            const sortedEntries = getSortedEntries(item.entries);
-
-            return (
-              <View key={item.id || idx}>
-                {idx > 0 && <View style={styles.billDivider} />}
-                <View style={styles.billDetailedContainer}>
-                  {/* Screenshot Blue Header Bar */}
-                  <View style={styles.billBlueHeader}>
-                    {/* Left Column */}
-                    <View style={{ flex: 1.2 }}>
-                      <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
-                      <Text style={styles.billHeaderTime}>{billTime}</Text>
-                    </View>
-
-                    {/* Center Column */}
-                    <View style={{ flex: 1, alignItems: 'center' }}>
-                      <Text style={styles.billHeaderGame}>{billGame}</Text>
-                      <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
-                    </View>
-
-                    {/* Right Column */}
-                    <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
-                      <Text style={styles.billHeaderDate}>{billDate}</Text>
-                      <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
-                      <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
-                    </View>
-                  </View>
-
-                  {/* Screenshot Table Rows */}
-                  <View style={styles.billTable}>
-                    {sortedEntries.length === 0 ? (
-                      <View style={styles.billTableRow}>
-                        <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
-                          No entries recorded for this bill
-                        </Text>
-                      </View>
-                    ) : (
-                      sortedEntries.map((entry: any, eIdx: number) => {
-                        const catLabel = formatEntryCategory(entry, item);
-                        const entryPrice = entry.total_price
-                          ? parseFloat(entry.total_price).toFixed(2)
-                          : entry.unit_price
-                          ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
-                          : (entry.quantity * 10).toFixed(2);
-
-                        return (
-                          <View key={eIdx} style={styles.billTableRow}>
-                            <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
-                            <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
-                            <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
-                            <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
-                          </View>
-                        );
-                      })
-                    )}
-                  </View>
-
-                  {/* Actions Bar: Edit and Delete Bill within time limit */}
-                  <View style={styles.billActionRow}>
-                    <TouchableOpacity
-                      style={styles.billActionBtnEdit}
-                      onPress={() => handleEditBill(item)}
-                      activeOpacity={0.8}
-                    >
-                      <Edit3 size={13} color="#2563EB" />
-                      <Text style={styles.billActionTextEdit}>Edit Bill</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.billActionBtnDelete}
-                      onPress={() => handleDeleteBill(item)}
-                      disabled={cancellingTicketNum === item.ticket_number}
-                      activeOpacity={0.8}
-                    >
-                      {cancellingTicketNum === item.ticket_number ? (
-                        <ActivityIndicator size="small" color="#DC2626" />
-                      ) : (
-                        <>
-                          <Trash2 size={13} color="#DC2626" />
-                          <Text style={styles.billActionTextDelete}>Delete Bill</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            );
-          })
+          salesData.items.map((item: any, idx: number) => (
+            <ManageSalesBillCard
+              key={item.id || idx}
+              item={item}
+              idx={idx}
+              cancellingTicketNum={cancellingTicketNum}
+              onEditBill={handleEditBill}
+              onDeleteBill={handleDeleteBill}
+            />
+          ))
         )}
 
         {/* Active Game Draws Section */}

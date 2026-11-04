@@ -163,9 +163,11 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     ]);
   };
 
-  // Fetched Results
+  // Fetched Results & Caches for 0ms Instant Navigation
   const [loading, setLoading] = useState(false);
   const [currentResult, setCurrentResult] = useState<any | null>(null);
+  const resultsCacheRef = useRef<Record<string, any>>({});
+  const checkingCacheRef = useRef<Record<string, any>>({});
 
   useEffect(() => {
     loadGamesAndInitialResult();
@@ -199,11 +201,19 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     }
   };
 
-  const loadResultChecking = async (drawId: string) => {
+  const loadResultChecking = async (drawId: string, forceRefresh = false) => {
     if (!drawId) return;
+
+    if (!forceRefresh && checkingCacheRef.current[drawId]) {
+      setCheckingData(checkingCacheRef.current[drawId]);
+      setCheckingLoading(false);
+      return;
+    }
+
     setCheckingLoading(true);
     try {
       const data = await api.checkResult(drawId);
+      checkingCacheRef.current[drawId] = data;
       setCheckingData(data);
     } catch (err: any) {
       Alert.alert('Result Checking Error', err.message || 'Failed to check draw results');
@@ -213,16 +223,23 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
     }
   };
 
-  const fetchResultsForGame = async (gameId: string, dateStr: string) => {
+  const fetchResultsForGame = async (gameId: string, dateStr: string, forceRefresh = false) => {
+    const cacheKey = `${gameId}:${dateStr}`;
+
+    if (!forceRefresh && resultsCacheRef.current[cacheKey] !== undefined) {
+      setCurrentResult(resultsCacheRef.current[cacheKey]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await api.getResults(dateStr, gameId);
-      if (res.results && res.results.length > 0) {
-        setCurrentResult(res.results[0]);
-      } else {
-        setCurrentResult(null);
-      }
+      const res = await api.getResults(dateStr, gameId, forceRefresh);
+      const foundResult = res.results && res.results.length > 0 ? res.results[0] : null;
+      resultsCacheRef.current[cacheKey] = foundResult;
+      setCurrentResult(foundResult);
     } catch {
+      resultsCacheRef.current[cacheKey] = null;
       setCurrentResult(null);
     } finally {
       setLoading(false);
@@ -630,16 +647,19 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
         `Total Winners: ${res.totalWinners ?? res.summary?.totalWinners ?? 0}\nTotal Prize Payout: ₹${res.totalPrizePayout ?? res.summary?.totalPrize ?? 0}\nTotal Commission: ₹${res.totalCommissionPayout ?? res.summary?.totalCommission ?? 0}`
       );
 
+      resultsCacheRef.current = {};
+      checkingCacheRef.current = {};
+
       const targetDrawId = publishDrawId;
       setShowPublishModal(false);
 
       if (selectedGame) {
-        await fetchResultsForGame(selectedGame.id, dateInput);
+        await fetchResultsForGame(selectedGame.id, dateInput, true);
       }
 
       setActiveTab('checking');
       setCheckingDrawId(targetDrawId);
-      await loadResultChecking(targetDrawId);
+      await loadResultChecking(targetDrawId, true);
     } catch (err: any) {
       Alert.alert('Save Error', err.message || 'Failed to save results');
     } finally {

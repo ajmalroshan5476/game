@@ -298,7 +298,8 @@ export const api = {
     clearApiCache('/api/ledger');
     return res;
   },
-  checkResult: (drawId: string) => request<any>(`/api/results/check/${drawId}`),
+  checkResult: (drawId: string, forceRefresh = false) =>
+    cachedRequest<any>(`/api/results/check/${drawId}`, {}, 30_000, forceRefresh),
 
   // Settlements & Payments
   getSettlements: (params?: { fromDate?: string; toDate?: string; targetUserId?: string }, forceRefresh = false) => {

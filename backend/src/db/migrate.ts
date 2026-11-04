@@ -62,6 +62,7 @@ export async function runMigrations() {
         UNIQUE (game_id, draw_date, draw_time)
       );
       CREATE INDEX IF NOT EXISTS idx_draws_game_date ON draws(game_id, draw_date);
+      CREATE INDEX IF NOT EXISTS idx_draws_date ON draws(draw_date);
     `);
 
     // 5. Prize Schemes
@@ -132,6 +133,7 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_tickets_draw ON tickets(draw_id);
       CREATE INDEX IF NOT EXISTS idx_tickets_number ON tickets(ticket_number);
       CREATE INDEX IF NOT EXISTS idx_tickets_org_status_created ON tickets(org_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tickets_draw_status ON tickets(draw_id, status);
 
       CREATE TABLE IF NOT EXISTS ticket_entries (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -183,6 +185,8 @@ export async function runMigrations() {
       );
       CREATE INDEX IF NOT EXISTS idx_winning_user ON winning_records(user_id);
       CREATE INDEX IF NOT EXISTS idx_winning_ticket ON winning_records(ticket_id);
+      CREATE INDEX IF NOT EXISTS idx_winning_result ON winning_records(result_id);
+      CREATE INDEX IF NOT EXISTS idx_winning_org_date ON winning_records(org_id, created_at);
     `);
 
     // 10. Financial Ledger

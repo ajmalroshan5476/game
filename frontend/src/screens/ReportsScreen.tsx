@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -353,6 +353,230 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
     return `${prefix}-${drawNum}`;
   };
 
+  const handleEditTicket = useCallback(async (item: any) => {
+    try {
+      const pRes = await api.getUserPrices(item.user_id);
+      setUserPrices(pRes.prices || []);
+    } catch {}
+    setEditingTicket(item);
+  }, []);
+
+  interface SalesBillCardProps {
+    item: any;
+    idx: number;
+  }
+
+  const SalesBillCard: React.FC<SalesBillCardProps> = React.memo(({ item, idx }) => {
+    const billGame = useMemo(() => formatBillGame(item), [item]);
+    const billTime = useMemo(() => formatBillTime(item.created_at), [item.created_at]);
+    const billDate = useMemo(() => formatBillDate(item.draw_date, item.created_at), [item.draw_date, item.created_at]);
+    const totalPriceStr = useMemo(() => parseFloat(item.total_amount || 0).toFixed(2), [item.total_amount]);
+    const sortedEntries = useMemo(() => getSortedEntries(item.entries), [item.entries]);
+
+    return (
+      <View key={item.id || idx}>
+        {idx > 0 && <View style={styles.billDivider} />}
+        <View style={styles.billDetailedContainer}>
+          {/* Screenshot Blue Header Bar */}
+          <View style={styles.billBlueHeader}>
+            {/* Left Column */}
+            <View style={{ flex: 1.2 }}>
+              <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
+              <Text style={styles.billHeaderTime}>{billTime}</Text>
+            </View>
+
+            {/* Center Column */}
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text style={styles.billHeaderGame}>{billGame}</Text>
+              <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
+            </View>
+
+            {/* Right Column */}
+            <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+              <Text style={styles.billHeaderDate}>{billDate}</Text>
+              <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
+              <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
+            </View>
+          </View>
+
+          {/* Screenshot Table Rows */}
+          <View style={styles.billTable}>
+            {sortedEntries.length === 0 ? (
+              <View style={styles.billTableRow}>
+                <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
+                  No entries recorded for this bill
+                </Text>
+              </View>
+            ) : (
+              sortedEntries.map((entry: any, eIdx: number) => {
+                const catLabel = formatEntryCategory(entry, item);
+                const entryPrice = entry.total_price
+                  ? parseFloat(entry.total_price).toFixed(2)
+                  : entry.unit_price
+                  ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
+                  : (entry.quantity * 10).toFixed(2);
+
+                return (
+                  <View key={eIdx} style={styles.billTableRow}>
+                    <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
+                    <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
+                    <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
+                    <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  });
+
+  interface TicketHistoryBillCardProps {
+    item: any;
+    idx: number;
+    isAdmin: boolean;
+    cancellingTicketNum: string | null;
+    onEditTicket: (t: any) => void;
+    onCancelTicket: (t: any) => void;
+  }
+
+  const TicketHistoryBillCard: React.FC<TicketHistoryBillCardProps> = React.memo(({
+    item,
+    idx,
+    isAdmin,
+    cancellingTicketNum,
+    onEditTicket,
+    onCancelTicket,
+  }) => {
+    const billGame = useMemo(() => formatBillGame(item), [item]);
+    const billTime = useMemo(() => formatBillTime(item.created_at), [item.created_at]);
+    const billDate = useMemo(() => formatBillDate(item.draw_date, item.created_at), [item.draw_date, item.created_at]);
+    const totalPriceStr = useMemo(() => parseFloat(item.total_amount || 0).toFixed(2), [item.total_amount]);
+    const sortedEntries = useMemo(() => getSortedEntries(item.entries), [item.entries]);
+    const isCancelled = item.status === 'CANCELLED';
+    const isResulted = item.draw_status === 'RESULTED';
+    const isCutoff = item.isCutoffPassed;
+    const canModify = !isCancelled && !isResulted && (isAdmin || !isCutoff);
+
+    return (
+      <View key={item.id || idx}>
+        {idx > 0 && <View style={styles.billDivider} />}
+        <View style={styles.billDetailedContainer}>
+          {/* Blue Header Bar matching screenshot */}
+          <View style={styles.billBlueHeader}>
+            <View style={{ flex: 1.2 }}>
+              <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
+              <Text style={styles.billHeaderTime}>{billTime}</Text>
+              {item.seller_username && (
+                <Text style={styles.ticketHistorySeller}>Seller: {item.seller_username}</Text>
+              )}
+            </View>
+
+            <View style={{ flex: 1, alignItems: 'flex-end', justifyContent: 'center' }}>
+              <View
+                style={[
+                  styles.billGameBadge,
+                  item.game_color ? { backgroundColor: item.game_color } : {},
+                ]}
+              >
+                <Text style={styles.billGameBadgeText}>{billGame}</Text>
+              </View>
+              <View
+                style={[
+                  styles.statusBadgeSmall,
+                  isCancelled ? styles.statusBadgeCancelled : styles.statusBadgeActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusBadgeSmallText,
+                    isCancelled ? { color: '#DC2626' } : { color: '#059669' },
+                  ]}
+                >
+                  {item.status}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Customer Row */}
+          {item.customer_name ? (
+            <View style={styles.billCustomerRow}>
+              <Text style={styles.billCustomerLabel}>Customer: </Text>
+              <Text style={styles.billCustomerName}>{item.customer_name}</Text>
+            </View>
+          ) : null}
+
+          {/* Entries Table */}
+          <View style={styles.billTableHead}>
+            <Text style={[styles.billColHead, { flex: 1.2 }]}>Category</Text>
+            <Text style={[styles.billColHead, { flex: 1 }]}>Number</Text>
+            <Text style={[styles.billColHead, { flex: 0.8, textAlign: 'center' }]}>Count</Text>
+            <Text style={[styles.billColHead, { flex: 1, textAlign: 'right' }]}>Total (₹)</Text>
+          </View>
+
+          {sortedEntries.map((entry: any, eIdx: number) => {
+            const entryCategory = formatEntryCategory(entry, item);
+            const entryPriceStr = parseFloat(entry.total_price || 0).toFixed(2);
+            return (
+              <View key={entry.id || eIdx} style={styles.billTableRow}>
+                <Text style={[styles.billColCell, { flex: 1.2 }]}>{entryCategory}</Text>
+                <Text style={[styles.billColCell, styles.billCellBold, { flex: 1 }]}>{entry.number}</Text>
+                <Text style={[styles.billColCell, { flex: 0.8, textAlign: 'center' }]}>{entry.quantity}</Text>
+                <Text style={[styles.billColCell, styles.billCellBold, { flex: 1, textAlign: 'right' }]}>
+                  {entryPriceStr}
+                </Text>
+              </View>
+            );
+          })}
+
+          {/* Card Footer: Totals and Actions */}
+          <View style={styles.ticketHistoryFooter}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.billFooterMeta}>
+                Total Count: <Text style={styles.billCellBold}>{item.total_quantity}</Text>
+              </Text>
+              <Text style={styles.billFooterTotal}>
+                Total: ₹{totalPriceStr}
+              </Text>
+            </View>
+
+            {/* Admin Actions: Edit & Cancel */}
+            {canModify && (
+              <View style={styles.ticketHistoryActionRow}>
+                <TouchableOpacity
+                  style={styles.historyEditBtn}
+                  activeOpacity={0.8}
+                  onPress={() => onEditTicket(item)}
+                >
+                  <Edit3 size={13} color="#FFFFFF" />
+                  <Text style={styles.historyActionBtnText}>Edit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.historyCancelBtn}
+                  activeOpacity={0.8}
+                  disabled={cancellingTicketNum === item.ticket_number}
+                  onPress={() => onCancelTicket(item)}
+                >
+                  {cancellingTicketNum === item.ticket_number ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Trash2 size={13} color="#FFFFFF" />
+                      <Text style={styles.historyActionBtnText}>Cancel</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  });
+
   // Screen Title based on screenshot
   const getHeaderTitle = () => {
     switch (reportType) {
@@ -658,71 +882,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
                   {(!data.items || data.items.length === 0) ? (
                     <Text style={styles.noData}>No sales tickets found for the selected filters.</Text>
                   ) : (
-                    data.items.map((item: any, idx: number) => {
-                      const billGame = formatBillGame(item);
-                      const billTime = formatBillTime(item.created_at);
-                      const billDate = formatBillDate(item.draw_date, item.created_at);
-                      const totalPriceStr = parseFloat(item.total_amount || 0).toFixed(2);
-                      const sortedEntries = getSortedEntries(item.entries);
-
-                      return (
-                        <View key={item.id || idx}>
-                          {idx > 0 && <View style={styles.billDivider} />}
-                          <View style={styles.billDetailedContainer}>
-                            {/* Screenshot Blue Header Bar */}
-                            <View style={styles.billBlueHeader}>
-                              {/* Left Column */}
-                              <View style={{ flex: 1.2 }}>
-                                <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
-                                <Text style={styles.billHeaderTime}>{billTime}</Text>
-                              </View>
-
-                              {/* Center Column */}
-                              <View style={{ flex: 1, alignItems: 'center' }}>
-                                <Text style={styles.billHeaderGame}>{billGame}</Text>
-                                <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
-                              </View>
-
-                              {/* Right Column */}
-                              <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
-                                <Text style={styles.billHeaderDate}>{billDate}</Text>
-                                <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
-                                <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
-                              </View>
-                            </View>
-
-                            {/* Screenshot Table Rows */}
-                            <View style={styles.billTable}>
-                              {sortedEntries.length === 0 ? (
-                                <View style={styles.billTableRow}>
-                                  <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
-                                    No entries recorded for this bill
-                                  </Text>
-                                </View>
-                              ) : (
-                                sortedEntries.map((entry: any, eIdx: number) => {
-                                  const catLabel = formatEntryCategory(entry, item);
-                                  const entryPrice = entry.total_price
-                                    ? parseFloat(entry.total_price).toFixed(2)
-                                    : entry.unit_price
-                                    ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
-                                    : (entry.quantity * 10).toFixed(2);
-
-                                  return (
-                                    <View key={eIdx} style={styles.billTableRow}>
-                                      <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
-                                      <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
-                                      <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
-                                      <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
-                                    </View>
-                                  );
-                                })
-                              )}
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })
+                    data.items.map((item: any, idx: number) => (
+                      <SalesBillCard key={item.id || idx} item={item} idx={idx} />
+                    ))
                   )}
                 </View>
               )}
@@ -1113,140 +1275,17 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
                       No tickets entered by the selected user/filters in this period.
                     </Text>
                   ) : (
-                    data.tickets.map((item: any, idx: number) => {
-                      const billGame = formatBillGame(item);
-                      const billTime = formatBillTime(item.created_at);
-                      const billDate = formatBillDate(item.draw_date, item.created_at);
-                      const totalPriceStr = parseFloat(item.total_amount || 0).toFixed(2);
-                      const sortedEntries = getSortedEntries(item.entries);
-                      const isCancelled = item.status === 'CANCELLED';
-                      const isResulted = item.draw_status === 'RESULTED';
-                      const isCutoff = item.isCutoffPassed;
-                      const canModify = !isCancelled && !isResulted && (isAdmin || !isCutoff);
-
-                      return (
-                        <View key={item.id || idx}>
-                          {idx > 0 && <View style={styles.billDivider} />}
-                          <View style={styles.billDetailedContainer}>
-                            {/* Blue Header Bar matching screenshot */}
-                            <View style={styles.billBlueHeader}>
-                              <View style={{ flex: 1.2 }}>
-                                <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
-                                <Text style={styles.billHeaderTime}>{billTime}</Text>
-                                {item.seller_username && (
-                                  <Text style={styles.ticketHistorySeller}>Seller: {item.seller_username}</Text>
-                                )}
-                              </View>
-
-                              <View style={{ flex: 1, alignItems: 'flex-end', justifyContent: 'center' }}>
-                                <View
-                                  style={[
-                                    styles.billGameBadge,
-                                    item.game_color ? { backgroundColor: item.game_color } : {},
-                                  ]}
-                                >
-                                  <Text style={styles.billGameBadgeText}>{billGame}</Text>
-                                </View>
-                                <View
-                                  style={[
-                                    styles.statusBadgeSmall,
-                                    isCancelled ? styles.statusBadgeCancelled : styles.statusBadgeActive,
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.statusBadgeSmallText,
-                                      isCancelled ? { color: '#DC2626' } : { color: '#059669' },
-                                    ]}
-                                  >
-                                    {item.status}
-                                  </Text>
-                                </View>
-                              </View>
-                            </View>
-
-                            {/* Customer Row */}
-                            {item.customer_name ? (
-                              <View style={styles.billCustomerRow}>
-                                <Text style={styles.billCustomerLabel}>Customer: </Text>
-                                <Text style={styles.billCustomerName}>{item.customer_name}</Text>
-                              </View>
-                            ) : null}
-
-                            {/* Entries Table */}
-                            <View style={styles.billTableHead}>
-                              <Text style={[styles.billColHead, { flex: 1.2 }]}>Category</Text>
-                              <Text style={[styles.billColHead, { flex: 1 }]}>Number</Text>
-                              <Text style={[styles.billColHead, { flex: 0.8, textAlign: 'center' }]}>Count</Text>
-                              <Text style={[styles.billColHead, { flex: 1, textAlign: 'right' }]}>Total (₹)</Text>
-                            </View>
-
-                            {sortedEntries.map((entry: any, eIdx: number) => {
-                              const entryCategory = formatEntryCategory(entry, item);
-                              const entryPriceStr = parseFloat(entry.total_price || 0).toFixed(2);
-                              return (
-                                <View key={entry.id || eIdx} style={styles.billTableRow}>
-                                  <Text style={[styles.billColCell, { flex: 1.2 }]}>{entryCategory}</Text>
-                                  <Text style={[styles.billColCell, styles.billCellBold, { flex: 1 }]}>{entry.number}</Text>
-                                  <Text style={[styles.billColCell, { flex: 0.8, textAlign: 'center' }]}>{entry.quantity}</Text>
-                                  <Text style={[styles.billColCell, styles.billCellBold, { flex: 1, textAlign: 'right' }]}>
-                                    {entryPriceStr}
-                                  </Text>
-                                </View>
-                              );
-                            })}
-
-                            {/* Card Footer: Totals and Actions */}
-                            <View style={styles.ticketHistoryFooter}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={styles.billFooterMeta}>
-                                  Total Count: <Text style={styles.billCellBold}>{item.total_quantity}</Text>
-                                </Text>
-                                <Text style={styles.billFooterTotal}>
-                                  Total: ₹{totalPriceStr}
-                                </Text>
-                              </View>
-
-                              {/* Admin Actions: Edit & Cancel */}
-                              {canModify && (
-                                <View style={styles.ticketHistoryActionRow}>
-                                  <TouchableOpacity
-                                    style={styles.historyEditBtn}
-                                    activeOpacity={0.8}
-                                    onPress={async () => {
-                                      try {
-                                        const pRes = await api.getUserPrices(item.user_id);
-                                        setUserPrices(pRes.prices || []);
-                                      } catch {}
-                                      setEditingTicket(item);
-                                    }}
-                                  >
-                                    <Edit3 size={13} color="#FFFFFF" />
-                                    <Text style={styles.historyActionBtnText}>Edit</Text>
-                                  </TouchableOpacity>
-
-                                  <TouchableOpacity
-                                    style={styles.historyCancelBtn}
-                                    activeOpacity={0.8}
-                                    disabled={cancellingTicketNum === item.ticket_number}
-                                    onPress={() => handleCancelHistoryTicket(item)}
-                                  >
-                                    {cancellingTicketNum === item.ticket_number ? (
-                                      <ActivityIndicator size="small" color="#FFFFFF" />
-                                    ) : (
-                                      <>
-                                        <Trash2 size={13} color="#FFFFFF" />
-                                        <Text style={styles.historyActionBtnText}>Cancel</Text>
-                                      </>
-                                    )}
-                                  </TouchableOpacity>
-                                </View>
-                              )}
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })
+                    data.tickets.map((item: any, idx: number) => (
+                      <TicketHistoryBillCard
+                        key={item.id || idx}
+                        item={item}
+                        idx={idx}
+                        isAdmin={isAdmin}
+                        cancellingTicketNum={cancellingTicketNum}
+                        onEditTicket={handleEditTicket}
+                        onCancelTicket={handleCancelHistoryTicket}
+                      />
+                    ))
                   )}
                 </View>
               )}
