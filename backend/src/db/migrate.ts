@@ -131,6 +131,7 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id);
       CREATE INDEX IF NOT EXISTS idx_tickets_draw ON tickets(draw_id);
       CREATE INDEX IF NOT EXISTS idx_tickets_number ON tickets(ticket_number);
+      CREATE INDEX IF NOT EXISTS idx_tickets_org_status_created ON tickets(org_id, status, created_at DESC);
 
       CREATE TABLE IF NOT EXISTS ticket_entries (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -145,6 +146,7 @@ export async function runMigrations() {
       );
       CREATE INDEX IF NOT EXISTS idx_entries_ticket ON ticket_entries(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_entries_number ON ticket_entries(number);
+      CREATE INDEX IF NOT EXISTS idx_entries_ticket_mode ON ticket_entries(ticket_id, mode);
     `);
 
     // 8. Official Results
@@ -207,6 +209,7 @@ export async function runMigrations() {
       );
       CREATE INDEX IF NOT EXISTS idx_ledger_user ON financial_ledger(user_id);
       CREATE INDEX IF NOT EXISTS idx_ledger_org ON financial_ledger(org_id);
+      CREATE INDEX IF NOT EXISTS idx_ledger_org_user_date ON financial_ledger(org_id, user_id, created_at);
     `);
 
     // 11. Settlements

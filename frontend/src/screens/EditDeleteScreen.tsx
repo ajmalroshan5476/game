@@ -87,8 +87,6 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
       const pRes = await api.getMyPrices();
       setUserPrices(pRes.prices || []);
     } catch {}
-
-    await loadTickets();
   };
 
   const loadTickets = async () => {

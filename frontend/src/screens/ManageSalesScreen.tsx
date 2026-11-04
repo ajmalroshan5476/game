@@ -76,7 +76,6 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
       const pRes = await api.getMyPrices();
       setUserPrices(pRes.prices || []);
     } catch {}
-    await fetchSales();
   };
 
   const handleEditBill = (bill: any) => {

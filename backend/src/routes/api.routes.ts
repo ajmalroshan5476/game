@@ -25,6 +25,10 @@ declare module '@fastify/jwt' {
 }
 
 export async function apiRoutes(fastify: FastifyInstance) {
+  // In-memory Auth User Cache (TTL 60s) to prevent 1 DB query per HTTP request
+  const authUserCache = new Map<string, { user: AuthUser; expiresAt: number }>();
+  let lastDrawsSyncKey = '';
+
   // Auth Decorator
   const authenticate = async (req: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -35,21 +39,36 @@ export async function apiRoutes(fastify: FastifyInstance) {
       const token = authHeader.substring(7);
       const decoded = fastify.jwt.verify<AuthUser>(token);
 
+      // Fast-path: Check in-memory active cache
+      const cached = authUserCache.get(decoded.userId);
+      if (cached && Date.now() < cached.expiresAt) {
+        req.user = cached.user;
+        return;
+      }
+
       // Verify active user in DB to avoid stale tokens across DB resets
       const userCheck = await query(
         `SELECT id, org_id, username, role, status FROM users WHERE id = $1`,
         [decoded.userId]
       );
       if (userCheck.rows.length === 0 || userCheck.rows[0].status !== 'ACTIVE') {
+        authUserCache.delete(decoded.userId);
         return reply.status(401).send({ error: 'Session expired or invalidated. Please log in again.' });
       }
 
-      req.user = {
+      const verifiedUser: AuthUser = {
         userId: userCheck.rows[0].id,
         orgId: userCheck.rows[0].org_id,
         username: userCheck.rows[0].username,
         role: userCheck.rows[0].role,
       };
+
+      authUserCache.set(decoded.userId, {
+        user: verifiedUser,
+        expiresAt: Date.now() + 60_000,
+      });
+
+      req.user = verifiedUser;
     } catch (err) {
       return reply.status(401).send({ error: 'Unauthorized token' });
     }
@@ -165,56 +184,60 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/games', { preHandler: authenticate }, async (req) => {
     const orgId = req.user!.orgId;
     const todayStr = getISTDateString();
+    const currentSyncKey = `${orgId}:${todayStr}`;
 
-    // Ensure today's draws exist for all active games
-    const activeGames = await query(`SELECT id, code, name FROM games WHERE org_id = $1 AND is_active = TRUE`, [orgId]);
-    for (const g of activeGames.rows) {
-      const existRes = await query(
-        `SELECT id FROM draws WHERE game_id = $1 AND draw_date = $2`,
-        [g.id, todayStr]
-      );
-      if (existRes.rows.length === 0) {
-        let drawTime = '15:00:00';
-        let cutoffTime = `${todayStr}T15:03:00+05:30`;
-        let editCutoffTime = `${todayStr}T15:00:00+05:30`;
-        if (g.name.includes('1 PM') || g.code.includes('1PM')) {
-          drawTime = '13:00:00';
-          cutoffTime = `${todayStr}T12:58:00+05:30`;
-          editCutoffTime = `${todayStr}T12:55:00+05:30`;
-        } else if (g.name.includes('6 PM') || g.code.includes('6PM')) {
-          drawTime = '18:00:00';
-          cutoffTime = `${todayStr}T17:58:00+05:30`;
-          editCutoffTime = `${todayStr}T17:55:00+05:30`;
-        } else if (g.name.includes('8 PM') || g.code.includes('8PM')) {
-          drawTime = '20:00:00';
-          cutoffTime = `${todayStr}T19:58:00+05:30`;
-          editCutoffTime = `${todayStr}T19:55:00+05:30`;
-        }
-        await query(
-          `INSERT INTO draws (game_id, draw_date, draw_time, cutoff_time, edit_cutoff_time, status)
-           VALUES ($1, $2, $3, $4, $5, 'OPEN')
-           ON CONFLICT DO NOTHING`,
-          [g.id, todayStr, drawTime, cutoffTime, editCutoffTime]
+    // Ensure today's draws exist for all active games at most once per day per org (not on every single GET request!)
+    if (lastDrawsSyncKey !== currentSyncKey) {
+      const activeGames = await query(`SELECT id, code, name FROM games WHERE org_id = $1 AND is_active = TRUE`, [orgId]);
+      for (const g of activeGames.rows) {
+        const existRes = await query(
+          `SELECT id FROM draws WHERE game_id = $1 AND draw_date = $2`,
+          [g.id, todayStr]
         );
-      } else {
-        // Keep cutoffs synced
-        let cutoffTime = `${todayStr}T15:03:00+05:30`;
-        let editCutoffTime = `${todayStr}T15:00:00+05:30`;
-        if (g.name.includes('1 PM') || g.code.includes('1PM')) {
-          cutoffTime = `${todayStr}T12:58:00+05:30`;
-          editCutoffTime = `${todayStr}T12:55:00+05:30`;
-        } else if (g.name.includes('6 PM') || g.code.includes('6PM')) {
-          cutoffTime = `${todayStr}T17:58:00+05:30`;
-          editCutoffTime = `${todayStr}T17:55:00+05:30`;
-        } else if (g.name.includes('8 PM') || g.code.includes('8PM')) {
-          cutoffTime = `${todayStr}T19:58:00+05:30`;
-          editCutoffTime = `${todayStr}T19:55:00+05:30`;
+        if (existRes.rows.length === 0) {
+          let drawTime = '15:00:00';
+          let cutoffTime = `${todayStr}T15:03:00+05:30`;
+          let editCutoffTime = `${todayStr}T15:00:00+05:30`;
+          if (g.name.includes('1 PM') || g.code.includes('1PM')) {
+            drawTime = '13:00:00';
+            cutoffTime = `${todayStr}T12:58:00+05:30`;
+            editCutoffTime = `${todayStr}T12:55:00+05:30`;
+          } else if (g.name.includes('6 PM') || g.code.includes('6PM')) {
+            drawTime = '18:00:00';
+            cutoffTime = `${todayStr}T17:58:00+05:30`;
+            editCutoffTime = `${todayStr}T17:55:00+05:30`;
+          } else if (g.name.includes('8 PM') || g.code.includes('8PM')) {
+            drawTime = '20:00:00';
+            cutoffTime = `${todayStr}T19:58:00+05:30`;
+            editCutoffTime = `${todayStr}T19:55:00+05:30`;
+          }
+          await query(
+            `INSERT INTO draws (game_id, draw_date, draw_time, cutoff_time, edit_cutoff_time, status)
+             VALUES ($1, $2, $3, $4, $5, 'OPEN')
+             ON CONFLICT DO NOTHING`,
+            [g.id, todayStr, drawTime, cutoffTime, editCutoffTime]
+          );
+        } else {
+          // Keep cutoffs synced
+          let cutoffTime = `${todayStr}T15:03:00+05:30`;
+          let editCutoffTime = `${todayStr}T15:00:00+05:30`;
+          if (g.name.includes('1 PM') || g.code.includes('1PM')) {
+            cutoffTime = `${todayStr}T12:58:00+05:30`;
+            editCutoffTime = `${todayStr}T12:55:00+05:30`;
+          } else if (g.name.includes('6 PM') || g.code.includes('6PM')) {
+            cutoffTime = `${todayStr}T17:58:00+05:30`;
+            editCutoffTime = `${todayStr}T17:55:00+05:30`;
+          } else if (g.name.includes('8 PM') || g.code.includes('8PM')) {
+            cutoffTime = `${todayStr}T19:58:00+05:30`;
+            editCutoffTime = `${todayStr}T19:55:00+05:30`;
+          }
+          await query(
+            `UPDATE draws SET cutoff_time = $1, edit_cutoff_time = $2 WHERE id = $3`,
+            [cutoffTime, editCutoffTime, existRes.rows[0].id]
+          );
         }
-        await query(
-          `UPDATE draws SET cutoff_time = $1, edit_cutoff_time = $2 WHERE id = $3`,
-          [cutoffTime, editCutoffTime, existRes.rows[0].id]
-        );
       }
+      lastDrawsSyncKey = currentSyncKey;
     }
 
     const res = await query(

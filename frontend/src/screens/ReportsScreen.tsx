@@ -74,9 +74,10 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
   // Toggle filters visibility (collapsed by default to show tickets cleanly like screenshot)
   const [showFilters, setShowFilters] = useState(false);
 
-  // Report Data
+  // Report Data & Tab Cache (Instant 0ms switching with SWR)
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
+  const reportsCacheRef = React.useRef<Record<string, any>>({});
 
   // Ticket Editing & Cancellation States
   const [editingTicket, setEditingTicket] = useState<any | null>(null);
@@ -158,10 +159,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
     setPickerType(null);
   };
 
-  const fetchReport = async () => {
-    setLoading(true);
-    setData(null);
-
+  const fetchReport = async (forceRefresh = false) => {
     const baseParams: any = {};
     if (selectedTicket && selectedTicket !== 'ALL') baseParams.gameId = selectedTicket;
     if (ticketNumber.trim()) baseParams.ticketNumber = ticketNumber.trim();
@@ -178,37 +176,54 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
       baseParams.status = selectedStatus;
     }
 
+    if (reportType === 'sales' || reportType === 'winnings' || reportType === 'ticket-history') {
+      baseParams.fromDate = fromDate;
+      baseParams.toDate = toDate;
+    } else if (reportType === 'bill-wise') {
+      baseParams.date = singleDate;
+    } else if (reportType === 'number-wise') {
+      baseParams.date = singleDate;
+      if (groupWithoutTicketName) baseParams.groupWithoutTicketName = 'true';
+    } else if (reportType === 'net-pay') {
+      baseParams.fromDate = fromDate;
+      baseParams.toDate = toDate;
+      baseParams.date = fromDate || singleDate;
+    }
+
+    const cacheKey = `${reportType}:${JSON.stringify(baseParams)}`;
+    const existingCache = reportsCacheRef.current[cacheKey];
+
+    // If cached data exists and not forcing refresh, render instantly with zero buffering!
+    if (existingCache && !forceRefresh) {
+      setData(existingCache);
+      setLoading(false);
+      return;
+    }
+
+    // Only show full spinner if there's no data currently visible
+    if (!existingCache && !data) {
+      setLoading(true);
+    }
+
     try {
+      let res: any = null;
       if (reportType === 'sales') {
-        baseParams.fromDate = fromDate;
-        baseParams.toDate = toDate;
-        const res = await api.getSalesReport(baseParams);
-        setData(res);
+        res = await api.getSalesReport(baseParams, forceRefresh);
       } else if (reportType === 'winnings') {
-        baseParams.fromDate = fromDate;
-        baseParams.toDate = toDate;
-        const res = await api.getWinningsReport(baseParams);
-        setData(res);
+        res = await api.getWinningsReport(baseParams, forceRefresh);
       } else if (reportType === 'bill-wise') {
-        baseParams.date = singleDate;
-        const res = await api.getBillWiseReport(baseParams);
-        setData(res);
+        res = await api.getBillWiseReport(baseParams, forceRefresh);
       } else if (reportType === 'number-wise') {
-        baseParams.date = singleDate;
-        if (groupWithoutTicketName) baseParams.groupWithoutTicketName = 'true';
-        const res = await api.getNumberWiseReport(baseParams);
-        setData(res);
+        res = await api.getNumberWiseReport(baseParams, forceRefresh);
       } else if (reportType === 'net-pay') {
-        baseParams.fromDate = fromDate;
-        baseParams.toDate = toDate;
-        baseParams.date = fromDate || singleDate;
-        const res = await api.getNetPayReport(baseParams);
-        setData(res);
+        res = await api.getNetPayReport(baseParams, forceRefresh);
       } else if (reportType === 'ticket-history') {
-        baseParams.fromDate = fromDate;
-        baseParams.toDate = toDate;
         baseParams.limit = 100;
-        const res = await api.getTickets(baseParams);
+        res = await api.getTickets(baseParams, forceRefresh);
+      }
+
+      if (res) {
+        reportsCacheRef.current[cacheKey] = res;
         setData(res);
       }
     } catch (err: any) {
@@ -233,7 +248,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
             try {
               await api.cancelTicket(t.ticket_number);
               Alert.alert('Success', `Ticket #${t.ticket_number} has been cancelled.`);
-              fetchReport();
+              fetchReport(true);
             } catch (err: any) {
               Alert.alert('Error', err.message || 'Failed to cancel ticket');
             } finally {

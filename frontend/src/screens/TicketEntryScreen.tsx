@@ -155,6 +155,81 @@ function getUniquePermutations(str: string): string[] {
   return Array.from(results).sort();
 }
 
+/**
+ * Isolated Live Countdown Badge component.
+ * Prevents the root TicketEntryScreen (2,500+ lines) from re-rendering 60 times a minute,
+ * completely eliminating keyboard input stutter and lag on mobile!
+ */
+const LiveCountdownBadge = React.memo(
+  ({
+    cutoffTime,
+    onCutoffChange,
+  }: {
+    cutoffTime?: string | null;
+    onCutoffChange?: (closed: boolean) => void;
+  }) => {
+    const [info, setInfo] = useState<{ closed: boolean; text: string }>({
+      closed: false,
+      text: '--:--',
+    });
+
+    useEffect(() => {
+      const update = () => {
+        if (!cutoffTime) {
+          const now = new Date();
+          const h = String(now.getHours()).padStart(2, '0');
+          const m = String(now.getMinutes()).padStart(2, '0');
+          const s = String(now.getSeconds()).padStart(2, '0');
+          setInfo({ closed: false, text: `${h}:${m}:${s}` });
+          return;
+        }
+
+        const cutoffDate = new Date(cutoffTime);
+        const now = new Date();
+        const diffMs = cutoffDate.getTime() - now.getTime();
+
+        if (diffMs <= 0) {
+          setInfo((prev) => {
+            if (!prev.closed) onCutoffChange?.(true);
+            return { closed: true, text: 'CLOSED' };
+          });
+          return;
+        }
+
+        const totalSec = Math.floor(diffMs / 1000);
+        const hours = Math.floor(totalSec / 3600);
+        const mins = Math.floor((totalSec % 3600) / 60);
+        const secs = totalSec % 60;
+
+        const text =
+          hours > 0
+            ? `${hours}h ${mins}m`
+            : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+        setInfo({ closed: false, text });
+      };
+
+      update();
+      const timer = setInterval(update, 1000);
+      return () => clearInterval(timer);
+    }, [cutoffTime, onCutoffChange]);
+
+    return (
+      <View style={[styles.timeBadge, info.closed && styles.timeBadgeClosed]}>
+        <Text style={styles.timeBadgeLabel}>
+          {info.closed ? 'CUTOFF' : 'TIME LEFT'}
+        </Text>
+        <Text
+          style={[styles.timeBadgeVal, info.closed && styles.timeBadgeValClosed]}
+          numberOfLines={1}
+        >
+          {info.text}
+        </Text>
+      </View>
+    );
+  }
+);
+
 export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
@@ -180,7 +255,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
 
   // Top Controls State
   const [digitGroup, setDigitGroup] = useState<DigitGroup>('3'); // '1', '2', or '3'
-  const [currentTimeStr, setCurrentTimeStr] = useState('00:00:00');
+  const [isCutoffClosed, setIsCutoffClosed] = useState(false);
 
   // Checkboxes matching reference screenshot: Range, Set, 100, 111
   const [isRange, setIsRange] = useState(false);
@@ -219,19 +294,15 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
     remaining: number;
   } | null>(null);
 
-  // Live Clock effect
+  // Sync Cutoff status when draw changes
   useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      const h = String(now.getHours()).padStart(2, '0');
-      const m = String(now.getMinutes()).padStart(2, '0');
-      const s = String(now.getSeconds()).padStart(2, '0');
-      setCurrentTimeStr(`${h}:${m}:${s}`);
-    };
-    updateClock();
-    const timer = setInterval(updateClock, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    if (selectedDraw?.cutoffTime) {
+      const isPast = new Date().getTime() >= new Date(selectedDraw.cutoffTime).getTime();
+      setIsCutoffClosed(isPast);
+    } else {
+      setIsCutoffClosed(false);
+    }
+  }, [selectedDraw]);
 
   // Load games and individual user ticket pricing
   useEffect(() => {
@@ -657,36 +728,6 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
     setEntries([]);
   };
 
-  // Live Cutoff countdown helper
-  const getCutoffInfo = () => {
-    if (!selectedDraw?.cutoffTime) {
-      return { closed: false, text: currentTimeStr, diffMs: 0 };
-    }
-    const cutoffDate = new Date(selectedDraw.cutoffTime);
-    const now = new Date();
-    const diffMs = cutoffDate.getTime() - now.getTime();
-
-    if (diffMs <= 0) {
-      return { closed: true, text: 'CLOSED', diffMs };
-    }
-
-    const totalSec = Math.floor(diffMs / 1000);
-    const hours = Math.floor(totalSec / 3600);
-    const mins = Math.floor((totalSec % 3600) / 60);
-    const secs = totalSec % 60;
-
-    if (hours > 0) {
-      return { closed: false, text: `${hours}h ${mins}m`, diffMs };
-    }
-    return {
-      closed: false,
-      text: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
-      diffMs,
-    };
-  };
-
-  const cutoffInfo = getCutoffInfo();
-
   // Totals calculations
   const totalCount = entries.reduce((acc, curr) => acc + curr.quantity, 0);
   const totalAmount = entries.reduce((acc, curr) => acc + curr.totalPrice, 0);
@@ -697,7 +738,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
       Alert.alert('Error', 'Please select an active game draw');
       return;
     }
-    if (cutoffInfo.closed) {
+    if (isCutoffClosed) {
       Alert.alert(
         'Cutoff Passed',
         'Cutoff has passed for today for this game. You will be able to enter next tickets for tomorrow only after 12:00 AM.'
@@ -924,30 +965,23 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
             <Text style={styles.gamePillText}>{gameCode}</Text>
           </TouchableOpacity>
 
-          {/* Time Badge (Live Countdown for Cutoff!) */}
-          <View style={[styles.timeBadge, cutoffInfo.closed && styles.timeBadgeClosed]}>
-            <Text style={styles.timeBadgeLabel}>
-              {cutoffInfo.closed ? 'CUTOFF' : 'TIME LEFT'}
-            </Text>
-            <Text
-              style={[styles.timeBadgeVal, cutoffInfo.closed && styles.timeBadgeValClosed]}
-              numberOfLines={1}
-            >
-              {cutoffInfo.text}
-            </Text>
-          </View>
+          {/* Time Badge (Live Countdown for Cutoff with zero parent re-renders!) */}
+          <LiveCountdownBadge
+            cutoffTime={selectedDraw?.cutoffTime}
+            onCutoffChange={setIsCutoffClosed}
+          />
 
           {/* SAVE Action Button */}
           <TouchableOpacity
             style={[
               styles.saveBtn,
-              (entries.length > 0 || (isRange && startRangeInput.trim() && endRangeInput.trim()) || (!isRange && numberInput.trim())) && !cutoffInfo.closed
+              (entries.length > 0 || (isRange && startRangeInput.trim() && endRangeInput.trim()) || (!isRange && numberInput.trim())) && !isCutoffClosed
                 ? styles.saveBtnActive
                 : styles.saveBtnDisabled,
             ]}
             activeOpacity={0.8}
             onPress={handleSaveTicket}
-            disabled={submitting || cutoffInfo.closed}
+            disabled={submitting || isCutoffClosed}
           >
             {submitting ? (
               <ActivityIndicator color="#00A86B" size="small" />
@@ -955,7 +989,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
               <Text
                 style={[
                   styles.saveBtnText,
-                  (entries.length > 0 || (isRange && startRangeInput.trim() && endRangeInput.trim()) || (!isRange && numberInput.trim())) && !cutoffInfo.closed
+                  (entries.length > 0 || (isRange && startRangeInput.trim() && endRangeInput.trim()) || (!isRange && numberInput.trim())) && !isCutoffClosed
                     ? styles.saveBtnTextActive
                     : styles.saveBtnTextDisabled,
                 ]}
@@ -967,7 +1001,7 @@ export const TicketEntryScreen: React.FC<TicketEntryScreenProps> = ({ onBack }) 
         </View>
 
         {/* Cutoff Warning Banner if Cutoff Passed */}
-        {cutoffInfo.closed && (
+        {isCutoffClosed && (
           <View style={styles.cutoffWarningBanner}>
             <Clock size={16} color="#DC2626" />
             <Text style={styles.cutoffWarningText}>

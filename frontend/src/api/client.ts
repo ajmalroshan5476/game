@@ -37,6 +37,29 @@ export const loadStoredToken = async (): Promise<string | null> => {
   }
 };
 
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+const memoryCache = new Map<string, CacheEntry<any>>();
+const inFlightRequests = new Map<string, Promise<any>>();
+
+/**
+ * Clears in-memory API cache (all or matching a URL prefix/pattern).
+ */
+export const clearApiCache = (pattern?: string) => {
+  if (!pattern) {
+    memoryCache.clear();
+    return;
+  }
+  for (const key of memoryCache.keys()) {
+    if (key.includes(pattern)) {
+      memoryCache.delete(key);
+    }
+  }
+};
+
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -65,7 +88,57 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return data as T;
 }
 
+/**
+ * Cached GET request with in-memory TTL and request deduplication.
+ * Prevents multiple simultaneous calls and returns instant data for fast tab transitions.
+ */
+async function cachedRequest<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  ttlMs = 60_000,
+  forceRefresh = false
+): Promise<T> {
+  const method = (options.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    return request<T>(endpoint, options);
+  }
+
+  const cacheKey = `${authToken || 'anon'}:${endpoint}`;
+
+  if (!forceRefresh) {
+    const cached = memoryCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.data as T;
+    }
+
+    const inFlight = inFlightRequests.get(cacheKey);
+    if (inFlight) {
+      return inFlight as Promise<T>;
+    }
+  }
+
+  const p = request<T>(endpoint, options)
+    .then((data) => {
+      memoryCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + ttlMs,
+      });
+      inFlightRequests.delete(cacheKey);
+      return data;
+    })
+    .catch((err) => {
+      inFlightRequests.delete(cacheKey);
+      throw err;
+    });
+
+  inFlightRequests.set(cacheKey, p);
+  return p;
+}
+
 export const api = {
+  // Cache utility
+  clearCache: clearApiCache,
+
   // Auth & Setup
   getSetupStatus: () => request<{ needsSetup: boolean }>('/api/auth/setup-status'),
   setupAdmin: (username: string, password: string) =>
@@ -84,83 +157,129 @@ export const api = {
         body: JSON.stringify({ username, password }),
       }
     ),
-  getMe: () => request<{ user: any }>('/api/auth/me'),
+  getMe: () => cachedRequest<{ user: any }>('/api/auth/me', {}, 60_000),
 
-  // Games & Draws
-  getGames: () => request<{ serverTime: string; games: any[] }>('/api/games'),
-  getDraws: (date?: string) => request<{ serverTime: string; draws: any[] }>(`/api/draws${date ? `?date=${date}` : ''}`),
+  // Games & Draws (Cached for 3 mins to stop redundant queries on every screen)
+  getGames: (forceRefresh = false) =>
+    cachedRequest<{ serverTime: string; games: any[] }>('/api/games', {}, 180_000, forceRefresh),
+  getDraws: (date?: string, forceRefresh = false) =>
+    cachedRequest<{ serverTime: string; draws: any[] }>(
+      `/api/draws${date ? `?date=${date}` : ''}`,
+      {},
+      60_000,
+      forceRefresh
+    ),
 
   // Tickets
-  submitTicket: (payload: {
+  submitTicket: async (payload: {
     drawId: string;
     customerName?: string;
     entries: any[];
     idempotencyKey?: string;
-  }) =>
-    request<any>('/api/tickets', {
+  }) => {
+    const res = await request<any>('/api/tickets', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
-  getTickets: (params?: {
-    targetUserId?: string;
-    gameId?: string;
-    drawId?: string;
-    date?: string;
-    fromDate?: string;
-    toDate?: string;
-    ticketNumber?: string;
-    group?: string;
-    mode?: string;
-    status?: string;
-    search?: string;
-    limit?: number;
-    offset?: number;
-  }) => {
+    });
+    clearApiCache('/api/tickets');
+    clearApiCache('/api/reports');
+    clearApiCache('/api/settlements');
+    clearApiCache('/api/ledger');
+    return res;
+  },
+  getTickets: (
+    params?: {
+      targetUserId?: string;
+      gameId?: string;
+      drawId?: string;
+      date?: string;
+      fromDate?: string;
+      toDate?: string;
+      ticketNumber?: string;
+      group?: string;
+      mode?: string;
+      status?: string;
+      search?: string;
+      limit?: number;
+      offset?: number;
+    },
+    forceRefresh = false
+  ) => {
     const qs = params ? new URLSearchParams(params as any).toString() : '';
-    return request<{ tickets: any[]; summary?: any }>(`/api/tickets${qs ? `?${qs}` : ''}`);
+    return cachedRequest<{ tickets: any[]; summary?: any }>(
+      `/api/tickets${qs ? `?${qs}` : ''}`,
+      {},
+      20_000,
+      forceRefresh
+    );
   },
   getTicket: (ticketNumber: string) => request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`),
-  editTicket: (
+  editTicket: async (
     ticketNumber: string,
     payload: { customerName?: string; entries: any[] }
-  ) =>
-    request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`, {
+  ) => {
+    const res = await request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }),
-  cancelTicket: (ticketNumber: string) =>
-    request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}/cancel`, {
+    });
+    clearApiCache('/api/tickets');
+    clearApiCache('/api/reports');
+    clearApiCache('/api/settlements');
+    clearApiCache('/api/ledger');
+    return res;
+  },
+  cancelTicket: async (ticketNumber: string) => {
+    const res = await request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}/cancel`, {
       method: 'POST',
       body: JSON.stringify({}),
-    }),
-  deleteTicket: (ticketNumber: string) =>
-    request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`, {
+    });
+    clearApiCache('/api/tickets');
+    clearApiCache('/api/reports');
+    clearApiCache('/api/settlements');
+    clearApiCache('/api/ledger');
+    return res;
+  },
+  deleteTicket: async (ticketNumber: string) => {
+    const res = await request<any>(`/api/tickets/${encodeURIComponent(ticketNumber)}`, {
       method: 'DELETE',
       body: JSON.stringify({}),
-    }),
+    });
+    clearApiCache('/api/tickets');
+    clearApiCache('/api/reports');
+    clearApiCache('/api/settlements');
+    clearApiCache('/api/ledger');
+    return res;
+  },
 
   // Limits
-  getLimits: (drawId: string) => request<{ limits: any[] }>(`/api/limits?drawId=${drawId}`),
-  setLimit: (drawId: string, number: string, maxQuantity: number) =>
-    request<any>('/api/admin/limits', {
+  getLimits: (drawId: string, forceRefresh = false) =>
+    cachedRequest<{ limits: any[] }>(`/api/limits?drawId=${drawId}`, {}, 20_000, forceRefresh),
+  setLimit: async (drawId: string, number: string, maxQuantity: number) => {
+    const res = await request<any>('/api/admin/limits', {
       method: 'POST',
       body: JSON.stringify({ drawId, number, maxQuantity }),
-    }),
-  reconcileLimits: (drawId: string) =>
-    request<any>('/api/admin/limits/reconcile', {
+    });
+    clearApiCache('/api/limits');
+    return res;
+  },
+  reconcileLimits: async (drawId: string) => {
+    const res = await request<any>('/api/admin/limits/reconcile', {
       method: 'POST',
       body: JSON.stringify({ drawId }),
-    }),
+    });
+    clearApiCache('/api/limits');
+    return res;
+  },
 
   // Results
-  getResults: (date?: string, gameId?: string) => {
+  getResults: (date?: string, gameId?: string, forceRefresh = false) => {
     const params = new URLSearchParams();
     if (date) params.append('date', date);
     if (gameId) params.append('gameId', gameId);
     const qs = params.toString();
-    return request<{ results: any[] }>(`/api/results${qs ? `?${qs}` : ''}`);
+    return cachedRequest<{ results: any[] }>(`/api/results${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
   },
-  publishResult: (payload: {
+  publishResult: async (payload: {
     drawId: string;
     firstPrize: string;
     secondPrize?: string;
@@ -168,58 +287,76 @@ export const api = {
     fourthPrize?: string;
     fifthPrize?: string;
     sixthPrizes?: string[];
-  }) =>
-    request<any>('/api/admin/results', {
+  }) => {
+    const res = await request<any>('/api/admin/results', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
+    });
+    clearApiCache('/api/results');
+    clearApiCache('/api/reports');
+    clearApiCache('/api/settlements');
+    clearApiCache('/api/ledger');
+    return res;
+  },
   checkResult: (drawId: string) => request<any>(`/api/results/check/${drawId}`),
 
   // Settlements & Payments
-  getSettlements: (params?: { fromDate?: string; toDate?: string; targetUserId?: string }) => {
+  getSettlements: (params?: { fromDate?: string; toDate?: string; targetUserId?: string }, forceRefresh = false) => {
     const qs = new URLSearchParams(params as any).toString();
-    return request<{ settlements: any[] }>(`/api/settlements${qs ? `?${qs}` : ''}`);
+    return cachedRequest<{ settlements: any[] }>(`/api/settlements${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
   },
-  recordPayment: (targetUserId: string, amount: number, direction: 'TO_USER' | 'FROM_USER', notes?: string) =>
-    request<any>('/api/admin/payments', {
+  recordPayment: async (targetUserId: string, amount: number, direction: 'TO_USER' | 'FROM_USER', notes?: string) => {
+    const res = await request<any>('/api/admin/payments', {
       method: 'POST',
       body: JSON.stringify({ targetUserId, amount, direction, notes }),
-    }),
-
-  // Reports
-  getSalesReport: (params?: any) => {
-    const qs = new URLSearchParams(params).toString();
-    return request<any>(`/api/reports/sales${qs ? `?${qs}` : ''}`);
-  },
-  getWinningsReport: (params?: any) => {
-    const qs = new URLSearchParams(params).toString();
-    return request<any>(`/api/reports/winnings${qs ? `?${qs}` : ''}`);
-  },
-  getBillWiseReport: (params?: any) => {
-    const qs = new URLSearchParams(params).toString();
-    return request<any>(`/api/reports/bill-wise${qs ? `?${qs}` : ''}`);
-  },
-  getNumberWiseReport: (params?: any) => {
-    const qs = new URLSearchParams(params).toString();
-    return request<any[]>(`/api/reports/number-wise${qs ? `?${qs}` : ''}`);
-  },
-  getNetPayReport: (params?: any) => {
-    const qs = new URLSearchParams(params).toString();
-    return request<any>(`/api/reports/net-pay${qs ? `?${qs}` : ''}`);
+    });
+    clearApiCache('/api/settlements');
+    clearApiCache('/api/ledger');
+    clearApiCache('/api/reports');
+    return res;
   },
 
-  // Admin Users
-  getUsers: () => request<{ users: any[] }>('/api/admin/users'),
-  createUser: (username: string, initialPassword: string, ticketPrices?: any[]) =>
-    request<any>('/api/admin/users', {
+  // Reports (Cached for 30s so tab switches within ReportsScreen are instant 0ms)
+  getSalesReport: (params?: any, forceRefresh = false) => {
+    const qs = new URLSearchParams(params).toString();
+    return cachedRequest<any>(`/api/reports/sales${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
+  },
+  getWinningsReport: (params?: any, forceRefresh = false) => {
+    const qs = new URLSearchParams(params).toString();
+    return cachedRequest<any>(`/api/reports/winnings${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
+  },
+  getBillWiseReport: (params?: any, forceRefresh = false) => {
+    const qs = new URLSearchParams(params).toString();
+    return cachedRequest<any>(`/api/reports/bill-wise${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
+  },
+  getNumberWiseReport: (params?: any, forceRefresh = false) => {
+    const qs = new URLSearchParams(params).toString();
+    return cachedRequest<any[]>(`/api/reports/number-wise${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
+  },
+  getNetPayReport: (params?: any, forceRefresh = false) => {
+    const qs = new URLSearchParams(params).toString();
+    return cachedRequest<any>(`/api/reports/net-pay${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
+  },
+
+  // Admin Users (Cached for 3 mins)
+  getUsers: (forceRefresh = false) =>
+    cachedRequest<{ users: any[] }>('/api/admin/users', {}, 180_000, forceRefresh),
+  createUser: async (username: string, initialPassword: string, ticketPrices?: any[]) => {
+    const res = await request<any>('/api/admin/users', {
       method: 'POST',
       body: JSON.stringify({ username, initialPassword, ticketPrices }),
-    }),
-  updateUserStatus: (userId: string, status: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE') =>
-    request<any>(`/api/admin/users/${userId}/status`, {
+    });
+    clearApiCache('/api/admin/users');
+    return res;
+  },
+  updateUserStatus: async (userId: string, status: 'ACTIVE' | 'SUSPENDED' | 'INACTIVE') => {
+    const res = await request<any>(`/api/admin/users/${userId}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
-    }),
+    });
+    clearApiCache('/api/admin/users');
+    return res;
+  },
   resetPassword: (userId: string, newPassword: string) =>
     request<any>(`/api/admin/users/${userId}/reset-password`, {
       method: 'POST',
@@ -227,39 +364,57 @@ export const api = {
     }),
 
   // User Custom Ticket Pricing
-  getUserPrices: (userId: string) => request<{ prices: any[] }>(`/api/admin/users/${userId}/prices`),
-  setUserPrices: (userId: string, prices: any[]) =>
-    request<any>(`/api/admin/users/${userId}/prices`, {
+  getUserPrices: (userId: string, forceRefresh = false) =>
+    cachedRequest<{ prices: any[] }>(`/api/admin/users/${userId}/prices`, {}, 180_000, forceRefresh),
+  setUserPrices: async (userId: string, prices: any[]) => {
+    const res = await request<any>(`/api/admin/users/${userId}/prices`, {
       method: 'POST',
       body: JSON.stringify({ prices }),
-    }),
-  getMyPrices: () => request<{ prices: any[] }>('/api/users/me/prices'),
+    });
+    clearApiCache('/api/admin/users');
+    clearApiCache('/api/users/me/prices');
+    return res;
+  },
+  getMyPrices: (forceRefresh = false) =>
+    cachedRequest<{ prices: any[] }>('/api/users/me/prices', {}, 180_000, forceRefresh),
 
   // Universal Game Range Limits
-  getGameLimits: (gameId?: string) => {
+  getGameLimits: (gameId?: string, forceRefresh = false) => {
     const qs = gameId ? `?gameId=${encodeURIComponent(gameId)}` : '';
-    return request<{ limits: any[] }>(`/api/admin/game-limits${qs}`);
+    return cachedRequest<{ limits: any[] }>(`/api/admin/game-limits${qs}`, {}, 30_000, forceRefresh);
   },
-  setGameLimit: (payload: {
+  setGameLimit: async (payload: {
     gameId: string;
     digitType: number;
     startRange: string;
     endRange: string;
     maxCap: number;
-  }) =>
-    request<any>('/api/admin/game-limits', {
+  }) => {
+    const res = await request<any>('/api/admin/game-limits', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
-  deleteGameLimit: (id: string) =>
-    request<any>(`/api/admin/game-limits/${id}`, {
+    });
+    clearApiCache('/api/admin/game-limits');
+    return res;
+  },
+  deleteGameLimit: async (id: string) => {
+    const res = await request<any>(`/api/admin/game-limits/${id}`, {
       method: 'DELETE',
-    }),
+    });
+    clearApiCache('/api/admin/game-limits');
+    return res;
+  },
 
   // Edit / Update Result
-  updateResult: (drawId: string, payload: any) =>
-    request<any>(`/api/admin/results/${drawId}`, {
+  updateResult: async (drawId: string, payload: any) => {
+    const res = await request<any>(`/api/admin/results/${drawId}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }),
+    });
+    clearApiCache('/api/results');
+    clearApiCache('/api/reports');
+    clearApiCache('/api/settlements');
+    clearApiCache('/api/ledger');
+    return res;
+  },
 };
