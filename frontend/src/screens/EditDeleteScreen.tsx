@@ -33,6 +33,229 @@ import {
 } from 'lucide-react-native';
 import { EditTicketModal } from '../components/EditTicketModal';
 
+const formatTicketTime = (timeStr?: string) => {
+  if (!timeStr) return '';
+  try {
+    const parts = timeStr.split(':');
+    let hours = parseInt(parts[0], 10);
+    const minutes = parts[1] || '00';
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return `${hours}:${minutes} ${ampm}`;
+  } catch {
+    return timeStr;
+  }
+};
+
+interface EditDeleteTicketCardProps {
+  ticket: any;
+  isAdmin: boolean;
+  isCancelling: boolean;
+  onEditTicket: (t: any) => void;
+  onCancelTicket: (t: any) => void;
+}
+
+const EditDeleteTicketCard: React.FC<EditDeleteTicketCardProps> = React.memo(({
+  ticket: t,
+  isAdmin,
+  isCancelling,
+  onEditTicket,
+  onCancelTicket,
+}) => {
+  const isCutoff = t.isCutoffPassed;
+  const isResulted = t.draw_status === 'RESULTED';
+  const isCancelled = t.status === 'CANCELLED';
+  const canModify = !isCancelled && !isResulted && (isAdmin || !isCutoff);
+  const formattedDrawDate = useMemo(() => (t.draw_date ? String(t.draw_date).split('T')[0] : ''), [t.draw_date]);
+  const formattedTimeStr = useMemo(() => formatTicketTime(t.draw_time), [t.draw_time]);
+  const formattedAmount = useMemo(() => parseFloat(t.total_amount || 0).toFixed(2), [t.total_amount]);
+  const entriesPreview = useMemo(() => t.entries?.slice(0, 15) || [], [t.entries]);
+
+  return (
+    <View key={t.id} style={styles.ticketCard}>
+      {/* Header Row: Ticket Number & Status */}
+      <View style={styles.ticketCardTop}>
+        <View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.ticketNumberText}>#{t.ticket_number}</Text>
+            {isAdmin && t.seller_username && (
+              <View style={styles.sellerTag}>
+                <Text style={styles.sellerTagText}>Agent: {t.seller_username}</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.ticketDrawMeta}>
+            {t.game_name} • {formattedTimeStr} • {formattedDrawDate}
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.statusBadge,
+            isCancelled ? styles.statusBadgeCancelled : styles.statusBadgeActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.statusBadgeText,
+              isCancelled ? { color: '#DC2626' } : { color: '#059669' },
+            ]}
+          >
+            {t.status}
+          </Text>
+        </View>
+      </View>
+
+      {/* Cutoff / Lock Notice Banner */}
+      <View
+        style={[
+          styles.cutoffBanner,
+          isResulted
+            ? styles.cutoffBannerGray
+            : isCutoff
+            ? isAdmin
+              ? styles.cutoffBannerAmber
+              : styles.cutoffBannerRed
+            : styles.cutoffBannerGreen,
+        ]}
+      >
+        <Clock
+          size={14}
+          color={
+            isResulted
+              ? '#64748B'
+              : isCutoff
+              ? isAdmin
+                ? '#D97706'
+                : '#DC2626'
+              : '#059669'
+          }
+        />
+        <Text
+          style={[
+            styles.cutoffBannerText,
+            {
+              color: isResulted
+                ? '#64748B'
+                : isCutoff
+                ? isAdmin
+                  ? '#92400E'
+                  : '#DC2626'
+                : '#065F46',
+            },
+          ]}
+        >
+          {isResulted
+            ? 'Draw results declared (Locked)'
+            : isCutoff
+            ? isAdmin
+              ? 'Cutoff passed (Admin override allowed)'
+              : 'Edit/Delete cutoff time has passed'
+            : t.edit_cutoff_time
+            ? `Editable until ${new Date(t.edit_cutoff_time).toLocaleTimeString('en-IN', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}`
+            : 'Open for editing/cancellation'}
+        </Text>
+      </View>
+
+      {/* Customer and Totals Info */}
+      <View style={styles.ticketMetaTable}>
+        {t.customer_name && (
+          <View style={styles.metaRow}>
+            <Text style={styles.metaLabel}>Customer:</Text>
+            <Text style={styles.metaVal}>{t.customer_name}</Text>
+          </View>
+        )}
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Total Count:</Text>
+          <Text style={styles.metaVal}>{t.total_quantity} units</Text>
+        </View>
+        <View style={[styles.metaRow, { borderBottomWidth: 0 }]}>
+          <Text style={styles.metaLabelBold}>Total Amount:</Text>
+          <Text style={styles.metaValBold}>₹{formattedAmount}</Text>
+        </View>
+      </View>
+
+      {/* Booked Entries Preview */}
+      <Text style={styles.entriesTitle}>BOOKED NUMBERS ({t.entries?.length || 0})</Text>
+      <View style={styles.entriesWrap}>
+        {entriesPreview.map((entry: any, eIdx: number) => (
+          <View key={entry.id || eIdx} style={styles.entryPill}>
+            <Text style={styles.entryPillNum}>{entry.number}</Text>
+            <Text
+              style={[
+                styles.entryPillMode,
+                entry.mode === 'BOX' && { backgroundColor: '#FCE7F3', color: '#BE185D' },
+              ]}
+            >
+              {entry.mode}
+            </Text>
+            <Text style={styles.entryPillQty}>x{entry.quantity}</Text>
+            <Text style={styles.entryPillPrice}>₹{entry.total_price}</Text>
+          </View>
+        ))}
+        {(t.entries?.length || 0) > 15 && (
+          <Text style={styles.entriesOverflowText}>
+            +{t.entries.length - 15} more entries
+          </Text>
+        )}
+      </View>
+
+      {/* Action Buttons: Edit & Delete */}
+      <View style={styles.actionRow}>
+        {/* EDIT BUTTON */}
+        <TouchableOpacity
+          style={[styles.actionBtn, styles.editBtn, !canModify && styles.actionBtnDisabled]}
+          onPress={() => onEditTicket(t)}
+          disabled={!canModify}
+          activeOpacity={0.8}
+        >
+          <Edit3 size={16} color={canModify ? '#FFFFFF' : '#94A3B8'} />
+          <Text
+            style={[
+              styles.actionBtnText,
+              !canModify && { color: '#94A3B8' },
+            ]}
+          >
+            Edit Ticket
+          </Text>
+        </TouchableOpacity>
+
+        {/* DELETE / CANCEL BUTTON */}
+        <TouchableOpacity
+          style={[
+            styles.actionBtn,
+            styles.deleteBtn,
+            (!canModify || isCancelling) && styles.actionBtnDisabled,
+          ]}
+          onPress={() => onCancelTicket(t)}
+          disabled={!canModify || isCancelling}
+          activeOpacity={0.8}
+        >
+          {isCancelling ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <>
+              <Trash2 size={16} color={canModify ? '#FFFFFF' : '#94A3B8'} />
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  !canModify && { color: '#94A3B8' },
+                ]}
+              >
+                Delete Ticket
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
+
 interface EditDeleteScreenProps {
   onBack: () => void;
 }
@@ -94,6 +317,7 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
   const loadTickets = async (forceRefresh = false) => {
     const params: any = {
       limit: 50,
+      includeSummary: false,
     };
     if (selectedStatus !== 'ALL') params.status = selectedStatus;
     if (selectedGameId !== 'ALL') params.gameId = selectedGameId;
@@ -193,229 +417,6 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
   const handleEditSuccess = (updated: any) => {
     loadTickets();
   };
-
-  const formatTime = (timeStr?: string) => {
-    if (!timeStr) return '';
-    try {
-      const parts = timeStr.split(':');
-      let hours = parseInt(parts[0], 10);
-      const minutes = parts[1] || '00';
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12;
-      hours = hours ? hours : 12;
-      return `${hours}:${minutes} ${ampm}`;
-    } catch {
-      return timeStr;
-    }
-  };
-
-  interface EditDeleteTicketCardProps {
-    ticket: any;
-    isAdmin: boolean;
-    isCancelling: boolean;
-    onEditTicket: (t: any) => void;
-    onCancelTicket: (t: any) => void;
-  }
-
-  const EditDeleteTicketCard: React.FC<EditDeleteTicketCardProps> = React.memo(({
-    ticket: t,
-    isAdmin,
-    isCancelling,
-    onEditTicket,
-    onCancelTicket,
-  }) => {
-    const isCutoff = t.isCutoffPassed;
-    const isResulted = t.draw_status === 'RESULTED';
-    const isCancelled = t.status === 'CANCELLED';
-    const canModify = !isCancelled && !isResulted && (isAdmin || !isCutoff);
-    const formattedDrawDate = useMemo(() => (t.draw_date ? String(t.draw_date).split('T')[0] : ''), [t.draw_date]);
-    const formattedTimeStr = useMemo(() => formatTime(t.draw_time), [t.draw_time]);
-    const formattedAmount = useMemo(() => parseFloat(t.total_amount || 0).toFixed(2), [t.total_amount]);
-    const entriesPreview = useMemo(() => t.entries?.slice(0, 15) || [], [t.entries]);
-
-    return (
-      <View key={t.id} style={styles.ticketCard}>
-        {/* Header Row: Ticket Number & Status */}
-        <View style={styles.ticketCardTop}>
-          <View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.ticketNumberText}>#{t.ticket_number}</Text>
-              {isAdmin && t.seller_username && (
-                <View style={styles.sellerTag}>
-                  <Text style={styles.sellerTagText}>Agent: {t.seller_username}</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.ticketDrawMeta}>
-              {t.game_name} • {formattedTimeStr} • {formattedDrawDate}
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.statusBadge,
-              isCancelled ? styles.statusBadgeCancelled : styles.statusBadgeActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.statusBadgeText,
-                isCancelled ? { color: '#DC2626' } : { color: '#059669' },
-              ]}
-            >
-              {t.status}
-            </Text>
-          </View>
-        </View>
-
-        {/* Cutoff / Lock Notice Banner */}
-        <View
-          style={[
-            styles.cutoffBanner,
-            isResulted
-              ? styles.cutoffBannerGray
-              : isCutoff
-              ? isAdmin
-                ? styles.cutoffBannerAmber
-                : styles.cutoffBannerRed
-              : styles.cutoffBannerGreen,
-          ]}
-        >
-          <Clock
-            size={14}
-            color={
-              isResulted
-                ? '#64748B'
-                : isCutoff
-                ? isAdmin
-                  ? '#D97706'
-                  : '#DC2626'
-                : '#059669'
-            }
-          />
-          <Text
-            style={[
-              styles.cutoffBannerText,
-              {
-                color: isResulted
-                  ? '#64748B'
-                  : isCutoff
-                  ? isAdmin
-                    ? '#92400E'
-                    : '#DC2626'
-                  : '#065F46',
-              },
-            ]}
-          >
-            {isResulted
-              ? 'Draw results declared (Locked)'
-              : isCutoff
-              ? isAdmin
-                ? 'Cutoff passed (Admin override allowed)'
-                : 'Edit/Delete cutoff time has passed'
-              : t.edit_cutoff_time
-              ? `Editable until ${new Date(t.edit_cutoff_time).toLocaleTimeString('en-IN', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}`
-              : 'Open for editing/cancellation'}
-          </Text>
-        </View>
-
-        {/* Customer and Totals Info */}
-        <View style={styles.ticketMetaTable}>
-          {t.customer_name && (
-            <View style={styles.metaRow}>
-              <Text style={styles.metaLabel}>Customer:</Text>
-              <Text style={styles.metaVal}>{t.customer_name}</Text>
-            </View>
-          )}
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>Total Count:</Text>
-            <Text style={styles.metaVal}>{t.total_quantity} units</Text>
-          </View>
-          <View style={[styles.metaRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.metaLabelBold}>Total Amount:</Text>
-            <Text style={styles.metaValBold}>₹{formattedAmount}</Text>
-          </View>
-        </View>
-
-        {/* Booked Entries Preview */}
-        <Text style={styles.entriesTitle}>BOOKED NUMBERS ({t.entries?.length || 0})</Text>
-        <View style={styles.entriesWrap}>
-          {entriesPreview.map((entry: any, eIdx: number) => (
-            <View key={entry.id || eIdx} style={styles.entryPill}>
-              <Text style={styles.entryPillNum}>{entry.number}</Text>
-              <Text
-                style={[
-                  styles.entryPillMode,
-                  entry.mode === 'BOX' && { backgroundColor: '#FCE7F3', color: '#BE185D' },
-                ]}
-              >
-                {entry.mode}
-              </Text>
-              <Text style={styles.entryPillQty}>x{entry.quantity}</Text>
-              <Text style={styles.entryPillPrice}>₹{entry.total_price}</Text>
-            </View>
-          ))}
-          {(t.entries?.length || 0) > 15 && (
-            <Text style={styles.entriesOverflowText}>
-              +{t.entries.length - 15} more entries
-            </Text>
-          )}
-        </View>
-
-        {/* Action Buttons: Edit & Delete */}
-        <View style={styles.actionRow}>
-          {/* EDIT BUTTON */}
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.editBtn, !canModify && styles.actionBtnDisabled]}
-            onPress={() => onEditTicket(t)}
-            disabled={!canModify}
-            activeOpacity={0.8}
-          >
-            <Edit3 size={16} color={canModify ? '#FFFFFF' : '#94A3B8'} />
-            <Text
-              style={[
-                styles.actionBtnText,
-                !canModify && { color: '#94A3B8' },
-              ]}
-            >
-              Edit Ticket
-            </Text>
-          </TouchableOpacity>
-
-          {/* DELETE / CANCEL BUTTON */}
-          <TouchableOpacity
-            style={[
-              styles.actionBtn,
-              styles.deleteBtn,
-              (!canModify || isCancelling) && styles.actionBtnDisabled,
-            ]}
-            onPress={() => onCancelTicket(t)}
-            disabled={!canModify || isCancelling}
-            activeOpacity={0.8}
-          >
-            {isCancelling ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <>
-                <Trash2 size={16} color={canModify ? '#FFFFFF' : '#94A3B8'} />
-                <Text
-                  style={[
-                    styles.actionBtnText,
-                    !canModify && { color: '#94A3B8' },
-                  ]}
-                >
-                  Delete Ticket
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  });
 
   return (
     <View style={styles.container}>

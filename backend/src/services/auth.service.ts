@@ -85,7 +85,18 @@ export class AuthService {
     return res.rows[0];
   }
 
-  static async listUsers(orgId: string): Promise<any[]> {
+  static async listUsers(orgId: string, compact = false): Promise<any[]> {
+    if (compact) {
+      const res = await query(
+        `SELECT u.id, u.username, u.role, u.status
+         FROM users u
+         WHERE u.org_id = $1 AND u.role = 'USER'
+         ORDER BY u.username ASC`,
+        [orgId]
+      );
+      return res.rows;
+    }
+
     const res = await query(
       `SELECT u.id, u.username, u.role, u.status, u.created_at,
               COALESCE(sales.total_sales, 0) AS total_sales,
@@ -100,11 +111,12 @@ export class AuthService {
                 WHERE utp.user_id = u.id AND utp.org_id = $1
               ) AS ticket_prices
        FROM users u
-       LEFT JOIN LATERAL (
-         SELECT SUM(t.total_amount) AS total_sales, COUNT(t.id) AS ticket_count
-         FROM tickets t
-         WHERE t.user_id = u.id AND t.status = 'ACTIVE'
-       ) sales ON true
+       LEFT JOIN (
+         SELECT user_id, SUM(total_amount) AS total_sales, COUNT(id) AS ticket_count
+         FROM tickets
+         WHERE org_id = $1 AND status = 'ACTIVE'
+         GROUP BY user_id
+       ) sales ON sales.user_id = u.id
        WHERE u.org_id = $1 AND u.role = 'USER'
        ORDER BY u.created_at DESC`,
       [orgId]

@@ -651,7 +651,8 @@ export async function apiRoutes(fastify: FastifyInstance) {
   // --------------------------------------------------------------------------
   fastify.get('/api/admin/users', { preHandler: requireAdmin }, async (req) => {
     const { orgId } = req.user!;
-    const users = await AuthService.listUsers(orgId);
+    const { compact } = req.query as any;
+    const users = await AuthService.listUsers(orgId, compact === 'true' || compact === true);
     return { users };
   });
 

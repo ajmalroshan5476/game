@@ -202,6 +202,7 @@ export const api = {
       search?: string;
       limit?: number;
       offset?: number;
+      includeSummary?: boolean | string;
     },
     forceRefresh = false
   ) => {
@@ -339,9 +340,9 @@ export const api = {
     return cachedRequest<any>(`/api/reports/net-pay${qs ? `?${qs}` : ''}`, {}, 30_000, forceRefresh);
   },
 
-  // Admin Users (Cached for 3 mins)
-  getUsers: (forceRefresh = false) =>
-    cachedRequest<{ users: any[] }>('/api/admin/users', {}, 180_000, forceRefresh),
+  // Admin Users (Cached for 3 mins, compact by default for instant filter populating)
+  getUsers: (forceRefresh = false, compact = true) =>
+    cachedRequest<{ users: any[] }>(`/api/admin/users${compact ? '?compact=true' : ''}`, {}, 180_000, forceRefresh),
   createUser: async (username: string, initialPassword: string, ticketPrices?: any[]) => {
     const res = await request<any>('/api/admin/users', {
       method: 'POST',

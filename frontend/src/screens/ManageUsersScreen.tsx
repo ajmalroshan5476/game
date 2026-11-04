@@ -112,7 +112,7 @@ export const ManageUsersScreen: React.FC<ManageUsersScreenProps> = ({ onBack }) 
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const res = await api.getUsers();
+      const res = await api.getUsers(false, false);
       setUsers(res.users || []);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to load users');

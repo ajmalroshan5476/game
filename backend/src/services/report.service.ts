@@ -28,30 +28,61 @@ export class ReportService {
       params.push(userId);
       whereClause += ` AND t.user_id = $${params.length}`;
     }
-    if (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
-      params.push(filters.gameId);
-      whereClause += ` AND (g.id::text = $${params.length} OR g.code ILIKE $${params.length} OR g.name ILIKE $${params.length})`;
-    }
-    if (filters?.drawTime && filters.drawTime !== 'ALL' && filters.drawTime !== 'undefined') {
-      params.push(filters.drawTime);
-      whereClause += ` AND d.draw_time = $${params.length}`;
-    }
-    if (filters?.drawId && filters.drawId !== 'undefined') {
-      params.push(filters.drawId);
-      whereClause += ` AND d.id = $${params.length}`;
-    }
 
     const effectiveFrom = filters?.fromDate || filters?.date;
     const effectiveTo = filters?.toDate || filters?.date;
 
-    if (effectiveFrom && effectiveFrom !== 'undefined') {
-      params.push(effectiveFrom);
-      whereClause += ` AND d.draw_date >= $${params.length}`;
+    // Fast-path: Pre-resolve matching draw IDs so tickets index idx_tickets_draw_status can be used directly
+    const hasDrawFilters = Boolean(
+      (effectiveFrom && effectiveFrom !== 'undefined') ||
+      (effectiveTo && effectiveTo !== 'undefined') ||
+      (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') ||
+      (filters?.drawTime && filters.drawTime !== 'ALL' && filters.drawTime !== 'undefined') ||
+      (filters?.drawId && filters.drawId !== 'undefined' && filters.drawId !== 'ALL')
+    );
+
+    if (hasDrawFilters) {
+      if (filters?.drawId && filters.drawId !== 'undefined' && filters.drawId !== 'ALL') {
+        params.push(filters.drawId);
+        whereClause += ` AND t.draw_id = $${params.length}`;
+      } else {
+        const dConds: string[] = [];
+        const dParams: any[] = [];
+        if (effectiveFrom && effectiveFrom !== 'undefined') {
+          dParams.push(effectiveFrom);
+          dConds.push(`d.draw_date >= $${dParams.length}`);
+        }
+        if (effectiveTo && effectiveTo !== 'undefined') {
+          dParams.push(effectiveTo);
+          dConds.push(`d.draw_date <= $${dParams.length}`);
+        }
+        if (filters?.drawTime && filters.drawTime !== 'ALL' && filters.drawTime !== 'undefined') {
+          dParams.push(filters.drawTime);
+          dConds.push(`d.draw_time = $${dParams.length}`);
+        }
+        if (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
+          dParams.push(filters.gameId);
+          dConds.push(`(g.id::text = $${dParams.length} OR g.code ILIKE $${dParams.length} OR g.name ILIKE $${dParams.length})`);
+        }
+
+        const drawRes = await query(
+          `SELECT d.id FROM draws d JOIN games g ON g.id = d.game_id WHERE ${dConds.join(' AND ')}`,
+          dParams
+        );
+        const matchingDrawIds = drawRes.rows.map((r: any) => r.id);
+
+        if (matchingDrawIds.length === 0) {
+          return {
+            summary: { total_bills: 0, total_quantity: 0, total_sales: 0 },
+            items: [],
+          };
+        }
+
+        params.push(matchingDrawIds);
+        whereClause += ` AND t.draw_id = ANY($${params.length}::uuid[])`;
+      }
     }
-    if (effectiveTo && effectiveTo !== 'undefined') {
-      params.push(effectiveTo);
-      whereClause += ` AND d.draw_date <= $${params.length}`;
-    }
+
     if (filters?.ticketNumber && filters.ticketNumber.trim()) {
       params.push(`%${filters.ticketNumber.trim()}%`);
       whereClause += ` AND t.ticket_number ILIKE $${params.length}`;
@@ -115,9 +146,6 @@ export class ReportService {
                COALESCE(SUM(te_sum.quantity), 0) AS total_quantity,
                COALESCE(SUM(te_sum.total_price), 0) AS total_sales
         FROM tickets t
-        JOIN draws d ON d.id = t.draw_id
-        JOIN games g ON g.id = d.game_id
-        JOIN users u ON u.id = t.user_id
         JOIN ticket_entries te_sum ON te_sum.ticket_id = t.id
         ${whereClause}
         ${entryConditions}
@@ -128,8 +156,6 @@ export class ReportService {
                COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
                COALESCE(SUM(t.total_amount), 0) AS total_sales
         FROM tickets t
-        JOIN draws d ON d.id = t.draw_id
-        ${filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined' ? 'JOIN games g ON g.id = d.game_id' : ''}
         ${whereClause}
       `;
     }
@@ -333,22 +359,48 @@ export class ReportService {
       params.push(userId);
       whereClause += ` AND t.user_id = $${params.length}`;
     }
-    if (filters?.drawId && filters.drawId !== 'undefined') {
-      params.push(filters.drawId);
-      whereClause += ` AND t.draw_id = $${params.length}`;
+
+    const hasDrawFilters = Boolean(
+      (filters?.date && filters.date !== 'undefined') ||
+      (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') ||
+      (filters?.drawTime && filters.drawTime !== 'ALL' && filters.drawTime !== 'undefined') ||
+      (filters?.drawId && filters.drawId !== 'undefined' && filters.drawId !== 'ALL')
+    );
+
+    if (hasDrawFilters) {
+      if (filters?.drawId && filters.drawId !== 'undefined' && filters.drawId !== 'ALL') {
+        params.push(filters.drawId);
+        whereClause += ` AND t.draw_id = $${params.length}`;
+      } else {
+        const dConds: string[] = [];
+        const dParams: any[] = [];
+        if (filters?.date && filters.date !== 'undefined') {
+          dParams.push(filters.date);
+          dConds.push(`d.draw_date = $${dParams.length}`);
+        }
+        if (filters?.drawTime && filters.drawTime !== 'ALL' && filters.drawTime !== 'undefined') {
+          dParams.push(filters.drawTime);
+          dConds.push(`d.draw_time = $${dParams.length}`);
+        }
+        if (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
+          dParams.push(filters.gameId);
+          dConds.push(`(g.id::text = $${dParams.length} OR g.code ILIKE $${dParams.length} OR g.name ILIKE $${dParams.length})`);
+        }
+
+        const drawRes = await query(
+          `SELECT d.id FROM draws d JOIN games g ON g.id = d.game_id WHERE ${dConds.join(' AND ')}`,
+          dParams
+        );
+        const matchingDrawIds = drawRes.rows.map((r: any) => r.id);
+        if (matchingDrawIds.length === 0) {
+          return [];
+        }
+
+        params.push(matchingDrawIds);
+        whereClause += ` AND t.draw_id = ANY($${params.length}::uuid[])`;
+      }
     }
-    if (filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
-      params.push(filters.gameId);
-      whereClause += ` AND (g.id::text = $${params.length} OR g.code ILIKE $${params.length} OR g.name ILIKE $${params.length})`;
-    }
-    if (filters?.drawTime && filters.drawTime !== 'ALL' && filters.drawTime !== 'undefined') {
-      params.push(filters.drawTime);
-      whereClause += ` AND d.draw_time = $${params.length}`;
-    }
-    if (filters?.date && filters.date !== 'undefined') {
-      params.push(filters.date);
-      whereClause += ` AND d.draw_date = $${params.length}`;
-    }
+
     if (filters?.ticketNumber && filters.ticketNumber.trim()) {
       params.push(`%${filters.ticketNumber.trim()}%`);
       whereClause += ` AND t.ticket_number ILIKE $${params.length}`;
@@ -370,8 +422,6 @@ export class ReportService {
              MAX(te.mode) AS sample_mode
       FROM ticket_entries te
       JOIN tickets t ON t.id = te.ticket_id
-      JOIN draws d ON d.id = t.draw_id
-      JOIN games g ON g.id = d.game_id
       ${whereClause}
       GROUP BY te.number
       ORDER BY total_quantity DESC

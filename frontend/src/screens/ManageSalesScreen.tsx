@@ -28,6 +28,203 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { EditTicketModal } from '../components/EditTicketModal';
 
+const formatBillTime = (dateString?: string) => {
+  if (!dateString) return '';
+  try {
+    const d = new Date(dateString);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[d.getMonth()];
+    const day = d.getDate();
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return `${month} ${day}, ${hours}:${minutes} ${ampm}`;
+  } catch {
+    return dateString;
+  }
+};
+
+const formatBillDate = (drawDate?: any, createdAt?: any) => {
+  if (drawDate) {
+    if (typeof drawDate === 'string') {
+      return drawDate.split('T')[0];
+    }
+    try {
+      return new Date(drawDate).toISOString().split('T')[0];
+    } catch {
+      return String(drawDate);
+    }
+  }
+  if (createdAt) {
+    if (typeof createdAt === 'string') {
+      return createdAt.split('T')[0];
+    }
+    try {
+      return new Date(createdAt).toISOString().split('T')[0];
+    } catch {
+      return String(createdAt);
+    }
+  }
+  return '';
+};
+
+const getSortedEntries = (entries: any[]) => {
+  if (!entries || !Array.isArray(entries)) return [];
+  return [...entries].sort((a, b) => {
+    const numA = parseInt(a.number, 10);
+    const numB = parseInt(b.number, 10);
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+      return numB - numA;
+    }
+    if (a.number !== b.number) {
+      return String(b.number).localeCompare(String(a.number));
+    }
+    const isBoxA = a.is_box || (a.mode || '').toUpperCase() === 'BOX';
+    const isBoxB = b.is_box || (b.mode || '').toUpperCase() === 'BOX';
+    if (isBoxA && !isBoxB) return -1;
+    if (!isBoxA && isBoxB) return 1;
+    return 0;
+  });
+};
+
+const formatBillGame = (item: any) => {
+  if (item.game_code && item.game_code !== 'ALL') return item.game_code;
+  const name = item.game_name || '';
+  const numMatch = name.match(/(\d+)/);
+  const num = numMatch ? numMatch[1] : '1';
+  if (name.toUpperCase().includes('LSK')) return `LSK${num}`;
+  return `DEAR${num}`;
+};
+
+const formatEntryCategory = (entry: any, item: any) => {
+  const gCode = formatBillGame(item);
+  const numMatch = gCode.match(/(\d+)/);
+  const drawNum = numMatch ? numMatch[1] : '1';
+  const isLsk = gCode.includes('LSK');
+  const prefix = isLsk ? 'LSK' : 'DEAR';
+  const boxPrefix = isLsk ? 'L-BOX' : 'D-BOX';
+
+  const mode = (entry.mode || '').toUpperCase();
+  if (mode === 'BOX' || entry.is_box) {
+    return `${boxPrefix}-${drawNum}`;
+  } else if (mode === 'SUPER' || mode === 'MAIN') {
+    return `${prefix}-${drawNum}`;
+  } else if (['AB', 'BC', 'AC', 'A', 'B', 'C'].includes(mode)) {
+    return `${prefix}-${mode}-${drawNum}`;
+  }
+  return `${prefix}-${drawNum}`;
+};
+
+interface ManageSalesBillCardProps {
+  item: any;
+  idx: number;
+  cancellingTicketNum: string | null;
+  onEditBill: (bill: any) => void;
+  onDeleteBill: (bill: any) => void;
+}
+
+const ManageSalesBillCard: React.FC<ManageSalesBillCardProps> = React.memo(({
+  item,
+  idx,
+  cancellingTicketNum,
+  onEditBill,
+  onDeleteBill,
+}) => {
+  const billGame = useMemo(() => formatBillGame(item), [item]);
+  const billTime = useMemo(() => formatBillTime(item.created_at), [item.created_at]);
+  const billDate = useMemo(() => formatBillDate(item.draw_date, item.created_at), [item.draw_date, item.created_at]);
+  const totalPriceStr = useMemo(() => parseFloat(item.total_amount || 0).toFixed(2), [item.total_amount]);
+  const sortedEntries = useMemo(() => getSortedEntries(item.entries), [item.entries]);
+
+  return (
+    <View key={item.id || idx}>
+      {idx > 0 && <View style={styles.billDivider} />}
+      <View style={styles.billDetailedContainer}>
+        {/* Screenshot Blue Header Bar */}
+        <View style={styles.billBlueHeader}>
+          {/* Left Column */}
+          <View style={{ flex: 1.2 }}>
+            <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
+            <Text style={styles.billHeaderTime}>{billTime}</Text>
+          </View>
+
+          {/* Center Column */}
+          <View style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={styles.billHeaderGame}>{billGame}</Text>
+            <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
+          </View>
+
+          {/* Right Column */}
+          <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
+            <Text style={styles.billHeaderDate}>{billDate}</Text>
+            <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
+            <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
+          </View>
+        </View>
+
+        {/* Screenshot Table Rows */}
+        <View style={styles.billTable}>
+          {sortedEntries.length === 0 ? (
+            <View style={styles.billTableRow}>
+              <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
+                No entries recorded for this bill
+              </Text>
+            </View>
+          ) : (
+            sortedEntries.map((entry: any, eIdx: number) => {
+              const catLabel = formatEntryCategory(entry, item);
+              const entryPrice = entry.total_price
+                ? parseFloat(entry.total_price).toFixed(2)
+                : entry.unit_price
+                ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
+                : (entry.quantity * 10).toFixed(2);
+
+              return (
+                <View key={eIdx} style={styles.billTableRow}>
+                  <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
+                  <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
+                  <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
+                  <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
+                </View>
+              );
+            })
+          )}
+        </View>
+
+        {/* Actions Bar: Edit and Delete Bill within time limit */}
+        <View style={styles.billActionRow}>
+          <TouchableOpacity
+            style={styles.billActionBtnEdit}
+            onPress={() => onEditBill(item)}
+            activeOpacity={0.8}
+          >
+            <Edit3 size={13} color="#2563EB" />
+            <Text style={styles.billActionTextEdit}>Edit Bill</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.billActionBtnDelete}
+            onPress={() => onDeleteBill(item)}
+            disabled={cancellingTicketNum === item.ticket_number}
+            activeOpacity={0.8}
+          >
+            {cancellingTicketNum === item.ticket_number ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <>
+                <Trash2 size={13} color="#DC2626" />
+                <Text style={styles.billActionTextDelete}>Delete Bill</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+});
+
 interface ManageSalesScreenProps {
   onBack: () => void;
   onNavigateAddTicket: () => void;
@@ -198,203 +395,6 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
       setLoading(false);
     }
   };
-
-  const formatBillTime = (dateString?: string) => {
-    if (!dateString) return '';
-    try {
-      const d = new Date(dateString);
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const month = months[d.getMonth()];
-      const day = d.getDate();
-      let hours = d.getHours();
-      const minutes = String(d.getMinutes()).padStart(2, '0');
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12;
-      hours = hours ? hours : 12;
-      return `${month} ${day}, ${hours}:${minutes} ${ampm}`;
-    } catch {
-      return dateString;
-    }
-  };
-
-  const formatBillDate = (drawDate?: any, createdAt?: any) => {
-    if (drawDate) {
-      if (typeof drawDate === 'string') {
-        return drawDate.split('T')[0];
-      }
-      try {
-        return new Date(drawDate).toISOString().split('T')[0];
-      } catch {
-        return String(drawDate);
-      }
-    }
-    if (createdAt) {
-      if (typeof createdAt === 'string') {
-        return createdAt.split('T')[0];
-      }
-      try {
-        return new Date(createdAt).toISOString().split('T')[0];
-      } catch {
-        return String(createdAt);
-      }
-    }
-    return '';
-  };
-
-  const getSortedEntries = (entries: any[]) => {
-    if (!entries || !Array.isArray(entries)) return [];
-    return [...entries].sort((a, b) => {
-      const numA = parseInt(a.number, 10);
-      const numB = parseInt(b.number, 10);
-      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
-        return numB - numA;
-      }
-      if (a.number !== b.number) {
-        return String(b.number).localeCompare(String(a.number));
-      }
-      const isBoxA = a.is_box || (a.mode || '').toUpperCase() === 'BOX';
-      const isBoxB = b.is_box || (b.mode || '').toUpperCase() === 'BOX';
-      if (isBoxA && !isBoxB) return -1;
-      if (!isBoxA && isBoxB) return 1;
-      return 0;
-    });
-  };
-
-  const formatBillGame = (item: any) => {
-    if (item.game_code && item.game_code !== 'ALL') return item.game_code;
-    const name = item.game_name || '';
-    const numMatch = name.match(/(\d+)/);
-    const num = numMatch ? numMatch[1] : '1';
-    if (name.toUpperCase().includes('LSK')) return `LSK${num}`;
-    return `DEAR${num}`;
-  };
-
-  const formatEntryCategory = (entry: any, item: any) => {
-    const gCode = formatBillGame(item);
-    const numMatch = gCode.match(/(\d+)/);
-    const drawNum = numMatch ? numMatch[1] : '1';
-    const isLsk = gCode.includes('LSK');
-    const prefix = isLsk ? 'LSK' : 'DEAR';
-    const boxPrefix = isLsk ? 'L-BOX' : 'D-BOX';
-
-    const mode = (entry.mode || '').toUpperCase();
-    if (mode === 'BOX' || entry.is_box) {
-      return `${boxPrefix}-${drawNum}`;
-    } else if (mode === 'SUPER' || mode === 'MAIN') {
-      return `${prefix}-${drawNum}`;
-    } else if (['AB', 'BC', 'AC', 'A', 'B', 'C'].includes(mode)) {
-      return `${prefix}-${mode}-${drawNum}`;
-    }
-    return `${prefix}-${drawNum}`;
-  };
-
-  interface ManageSalesBillCardProps {
-    item: any;
-    idx: number;
-    cancellingTicketNum: string | null;
-    onEditBill: (bill: any) => void;
-    onDeleteBill: (bill: any) => void;
-  }
-
-  const ManageSalesBillCard: React.FC<ManageSalesBillCardProps> = React.memo(({
-    item,
-    idx,
-    cancellingTicketNum,
-    onEditBill,
-    onDeleteBill,
-  }) => {
-    const billGame = useMemo(() => formatBillGame(item), [item]);
-    const billTime = useMemo(() => formatBillTime(item.created_at), [item.created_at]);
-    const billDate = useMemo(() => formatBillDate(item.draw_date, item.created_at), [item.draw_date, item.created_at]);
-    const totalPriceStr = useMemo(() => parseFloat(item.total_amount || 0).toFixed(2), [item.total_amount]);
-    const sortedEntries = useMemo(() => getSortedEntries(item.entries), [item.entries]);
-
-    return (
-      <View key={item.id || idx}>
-        {idx > 0 && <View style={styles.billDivider} />}
-        <View style={styles.billDetailedContainer}>
-          {/* Screenshot Blue Header Bar */}
-          <View style={styles.billBlueHeader}>
-            {/* Left Column */}
-            <View style={{ flex: 1.2 }}>
-              <Text style={styles.billHeaderNumber}>Bill #{item.ticket_number},</Text>
-              <Text style={styles.billHeaderTime}>{billTime}</Text>
-            </View>
-
-            {/* Center Column */}
-            <View style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={styles.billHeaderGame}>{billGame}</Text>
-              <Text style={styles.billHeaderCount}>Count: {item.total_quantity}</Text>
-            </View>
-
-            {/* Right Column */}
-            <View style={{ flex: 1.2, alignItems: 'flex-end' }}>
-              <Text style={styles.billHeaderDate}>{billDate}</Text>
-              <Text style={styles.billHeaderPrice}>Price: {totalPriceStr}</Text>
-              <Text style={styles.billHeaderComm}>Commition: 0.00</Text>
-            </View>
-          </View>
-
-          {/* Screenshot Table Rows */}
-          <View style={styles.billTable}>
-            {sortedEntries.length === 0 ? (
-              <View style={styles.billTableRow}>
-                <Text style={[styles.billTableCell, { flex: 1, textAlign: 'center', color: '#94A3B8' }]}>
-                  No entries recorded for this bill
-                </Text>
-              </View>
-            ) : (
-              sortedEntries.map((entry: any, eIdx: number) => {
-                const catLabel = formatEntryCategory(entry, item);
-                const entryPrice = entry.total_price
-                  ? parseFloat(entry.total_price).toFixed(2)
-                  : entry.unit_price
-                  ? (entry.quantity * parseFloat(entry.unit_price)).toFixed(2)
-                  : (entry.quantity * 10).toFixed(2);
-
-                return (
-                  <View key={eIdx} style={styles.billTableRow}>
-                    <Text style={[styles.billTableCell, styles.billColCat]}>{catLabel}</Text>
-                    <Text style={[styles.billTableCell, styles.billColNum]}>{entry.number}</Text>
-                    <Text style={[styles.billTableCell, styles.billColCount]}>{entry.quantity}</Text>
-                    <Text style={[styles.billTableCell, styles.billColPrice]}>{entryPrice}</Text>
-                  </View>
-                );
-              })
-            )}
-          </View>
-
-          {/* Actions Bar: Edit and Delete Bill within time limit */}
-          <View style={styles.billActionRow}>
-            <TouchableOpacity
-              style={styles.billActionBtnEdit}
-              onPress={() => onEditBill(item)}
-              activeOpacity={0.8}
-            >
-              <Edit3 size={13} color="#2563EB" />
-              <Text style={styles.billActionTextEdit}>Edit Bill</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.billActionBtnDelete}
-              onPress={() => onDeleteBill(item)}
-              disabled={cancellingTicketNum === item.ticket_number}
-              activeOpacity={0.8}
-            >
-              {cancellingTicketNum === item.ticket_number ? (
-                <ActivityIndicator size="small" color="#DC2626" />
-              ) : (
-                <>
-                  <Trash2 size={13} color="#DC2626" />
-                  <Text style={styles.billActionTextDelete}>Delete Bill</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  });
 
   return (
     <View style={styles.container}>

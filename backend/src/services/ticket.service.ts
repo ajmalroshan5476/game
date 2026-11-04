@@ -823,6 +823,7 @@ export class TicketService {
       search?: string;
       limit?: number;
       offset?: number;
+      includeSummary?: boolean | string;
     } = {},
     isAdmin = false
   ) {
@@ -839,27 +840,52 @@ export class TicketService {
       whereClause += ` AND t.user_id = $${params.length}`;
     }
 
-    if (filters.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
-      params.push(filters.gameId);
-      whereClause += ` AND (g.id::text = $${params.length} OR g.code ILIKE $${params.length} OR g.name ILIKE $${params.length})`;
-    }
-
-    if (filters.drawId && filters.drawId !== 'ALL' && filters.drawId !== 'undefined') {
-      params.push(filters.drawId);
-      whereClause += ` AND d.id = $${params.length}`;
-    }
-
     const effectiveFrom = filters.fromDate || (!filters.toDate ? filters.date : undefined);
     const effectiveTo = filters.toDate || (!filters.fromDate ? filters.date : undefined);
 
-    if (effectiveFrom && effectiveFrom !== 'undefined') {
-      params.push(effectiveFrom);
-      whereClause += ` AND d.draw_date >= $${params.length}`;
-    }
+    const hasDrawFilters = Boolean(
+      (effectiveFrom && effectiveFrom !== 'undefined') ||
+      (effectiveTo && effectiveTo !== 'undefined') ||
+      (filters.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') ||
+      (filters.drawId && filters.drawId !== 'ALL' && filters.drawId !== 'undefined')
+    );
 
-    if (effectiveTo && effectiveTo !== 'undefined') {
-      params.push(effectiveTo);
-      whereClause += ` AND d.draw_date <= $${params.length}`;
+    if (hasDrawFilters) {
+      if (filters.drawId && filters.drawId !== 'ALL' && filters.drawId !== 'undefined') {
+        params.push(filters.drawId);
+        whereClause += ` AND t.draw_id = $${params.length}`;
+      } else {
+        const dConds: string[] = [];
+        const dParams: any[] = [];
+        if (effectiveFrom && effectiveFrom !== 'undefined') {
+          dParams.push(effectiveFrom);
+          dConds.push(`d.draw_date >= $${dParams.length}`);
+        }
+        if (effectiveTo && effectiveTo !== 'undefined') {
+          dParams.push(effectiveTo);
+          dConds.push(`d.draw_date <= $${dParams.length}`);
+        }
+        if (filters.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined') {
+          dParams.push(filters.gameId);
+          dConds.push(`(g.id::text = $${dParams.length} OR g.code ILIKE $${dParams.length} OR g.name ILIKE $${dParams.length})`);
+        }
+
+        const drawRes = await pool.query(
+          `SELECT d.id FROM draws d JOIN games g ON g.id = d.game_id WHERE ${dConds.join(' AND ')}`,
+          dParams
+        );
+        const matchingDrawIds = drawRes.rows.map((r: any) => r.id);
+
+        if (matchingDrawIds.length === 0) {
+          return {
+            tickets: [],
+            summary: { total_bills: 0, total_quantity: 0, total_sales: 0 },
+          };
+        }
+
+        params.push(matchingDrawIds);
+        whereClause += ` AND t.draw_id = ANY($${params.length}::uuid[])`;
+      }
     }
 
     if (filters.ticketNumber && filters.ticketNumber.trim()) {
@@ -919,20 +945,28 @@ export class TicketService {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const summarySql = `
-      SELECT COUNT(t.id) AS total_bills,
-             COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
-             COALESCE(SUM(t.total_amount), 0) AS total_sales
-      FROM tickets t
-      JOIN draws d ON d.id = t.draw_id
-      ${filters.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined' ? 'JOIN games g ON g.id = d.game_id' : ''}
-      ${whereClause}
-    `;
+    const shouldIncludeSummary = filters.includeSummary !== false && filters.includeSummary !== 'false';
 
-    const [ticketsRes, summaryRes] = await Promise.all([
-      pool.query(sql, params),
-      pool.query(summarySql, params),
-    ]);
+    let summaryRes = { rows: [{ total_bills: 0, total_quantity: 0, total_sales: 0 }] };
+    let ticketsRes: any;
+
+    if (shouldIncludeSummary) {
+      const summarySql = `
+        SELECT COUNT(t.id) AS total_bills,
+               COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
+               COALESCE(SUM(t.total_amount), 0) AS total_sales
+        FROM tickets t
+        ${whereClause}
+      `;
+      const [tRes, sRes] = await Promise.all([
+        pool.query(sql, params),
+        pool.query(summarySql, params),
+      ]);
+      ticketsRes = tRes;
+      summaryRes = sRes;
+    } else {
+      ticketsRes = await pool.query(sql, params);
+    }
 
     const formattedTickets = ticketsRes.rows.map((r) => ({
       ...r,

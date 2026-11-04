@@ -63,6 +63,8 @@ export async function runMigrations() {
       );
       CREATE INDEX IF NOT EXISTS idx_draws_game_date ON draws(game_id, draw_date);
       CREATE INDEX IF NOT EXISTS idx_draws_date ON draws(draw_date);
+      CREATE INDEX IF NOT EXISTS idx_draws_date_time ON draws(draw_date, draw_time);
+      CREATE INDEX IF NOT EXISTS idx_draws_game_date_time ON draws(game_id, draw_date, draw_time);
     `);
 
     // 5. Prize Schemes
@@ -135,6 +137,10 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_tickets_org_status_created ON tickets(org_id, status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tickets_org_created ON tickets(org_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tickets_draw_status ON tickets(draw_id, status);
+      CREATE INDEX IF NOT EXISTS idx_tickets_draw_status_created ON tickets(draw_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tickets_org_draw_status ON tickets(org_id, draw_id, status);
+      CREATE INDEX IF NOT EXISTS idx_tickets_user_status_created ON tickets(user_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tickets_org_user_status_created ON tickets(org_id, user_id, status, created_at DESC);
 
       CREATE TABLE IF NOT EXISTS ticket_entries (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -150,6 +156,7 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_entries_ticket ON ticket_entries(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_entries_number ON ticket_entries(number);
       CREATE INDEX IF NOT EXISTS idx_entries_ticket_mode ON ticket_entries(ticket_id, mode);
+      CREATE INDEX IF NOT EXISTS idx_entries_ticket_calc ON ticket_entries(ticket_id, quantity, total_price);
     `);
 
     // 8. Official Results
