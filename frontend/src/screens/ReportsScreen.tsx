@@ -379,8 +379,8 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
   // Dropdown Modals
   const [pickerType, setPickerType] = useState<'ticket' | 'group' | 'mode' | 'user' | 'status' | null>(null);
 
-  // Toggle filters visibility (collapsed by default to show tickets cleanly like screenshot)
-  const [showFilters, setShowFilters] = useState(false);
+  // Toggle filters visibility (open by default so users choose what they want before loading)
+  const [showFilters, setShowFilters] = useState(true);
 
   // Report Data & Tab Cache (Instant 0ms switching with SWR)
   const [loading, setLoading] = useState(false);
@@ -399,20 +399,32 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
     }
   }, [isAdmin]);
 
+  // When switching between report tabs, restore cached data if already generated, or keep clean
   useEffect(() => {
-    fetchReport();
-  }, [
-    reportType,
-    selectedTicket,
-    fromDate,
-    toDate,
-    singleDate,
-    selectedGroup,
-    selectedMode,
-    groupWithoutTicketName,
-    targetUserId,
-    selectedStatus,
-  ]);
+    const baseParams: any = {};
+    if (selectedTicket && selectedTicket !== 'ALL') baseParams.gameId = selectedTicket;
+    if (ticketNumber.trim()) baseParams.ticketNumber = ticketNumber.trim();
+    if (selectedGroup && selectedGroup !== 'ALL' && selectedGroup !== 'Select') baseParams.group = selectedGroup;
+    if (selectedMode && selectedMode !== 'ALL') baseParams.mode = selectedMode;
+    if (targetUserId && targetUserId !== 'ALL') baseParams.targetUserId = targetUserId;
+    if (selectedStatus && selectedStatus !== 'ALL') baseParams.status = selectedStatus;
+    if (reportType === 'sales' || reportType === 'winnings' || reportType === 'ticket-history') {
+      baseParams.fromDate = fromDate;
+      baseParams.toDate = toDate;
+    } else if (reportType === 'bill-wise' || reportType === 'number-wise') {
+      baseParams.date = singleDate;
+    } else if (reportType === 'net-pay') {
+      baseParams.fromDate = fromDate;
+      baseParams.toDate = toDate;
+    }
+
+    const cacheKey = `${reportType}:${JSON.stringify(baseParams)}`;
+    if (reportsCacheRef.current[cacheKey]) {
+      setData(reportsCacheRef.current[cacheKey]);
+    } else {
+      setData(null);
+    }
+  }, [reportType]);
 
   const loadGames = async () => {
     try {
@@ -837,8 +849,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
               style={[styles.submitButton, { backgroundColor: buttonColor }]}
               activeOpacity={0.85}
               onPress={() => {
-                setShowFilters(false);
-                fetchReport();
+                fetchReport(true);
               }}
               disabled={loading}
             >
@@ -855,6 +866,14 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
         <View style={styles.resultsArea}>
           {loading ? (
             <ActivityIndicator size="large" color={colors.emerald} style={{ marginTop: 24 }} />
+          ) : !data ? (
+            <View style={styles.promptCard}>
+              <Filter size={32} color={buttonColor} style={{ marginBottom: 10 }} />
+              <Text style={styles.promptTitle}>Ready to Generate Report</Text>
+              <Text style={styles.promptSubtitle}>
+                Select your desired game, date range, or seller above and tap "{buttonText}" to load data.
+              </Text>
+            </View>
           ) : (
             <>
               {/* 1. SALES REPORT REAL-TIME DATA (Pixel-perfect replication of reference screenshot) */}
@@ -1581,6 +1600,32 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  promptCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 24,
+    marginHorizontal: 16,
+    marginVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
+  },
+  promptTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  promptSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 320,
   },
   // REAL-TIME RESULTS STYLES
   resultsArea: {

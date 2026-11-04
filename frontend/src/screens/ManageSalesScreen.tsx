@@ -262,10 +262,6 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
     loadGamesAndSales();
   }, []);
 
-  useEffect(() => {
-    fetchSales();
-  }, [selectedTicket, fromDate, toDate, selectedGroup, selectedMode]);
-
   const loadGamesAndSales = async () => {
     try {
       const gamesRes = await api.getGames();
@@ -547,6 +543,14 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
 
         {loading ? (
           <ActivityIndicator color={colors.emerald} style={{ marginVertical: 20 }} />
+        ) : !salesData ? (
+          <View style={styles.promptCard}>
+            <Receipt size={36} color="#0D9488" style={{ marginBottom: 10 }} />
+            <Text style={styles.promptTitle}>Filter & View Sales</Text>
+            <Text style={styles.promptSubtitle}>
+              Configure your game, date range, or ticket number above and tap "Generate Report" to view sales bills.
+            </Text>
+          </View>
         ) : !salesData?.items || salesData.items.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Receipt size={36} color="#94A3B8" />
@@ -837,6 +841,31 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
+  },
+  promptCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 24,
+    marginVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
+  },
+  promptTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  promptSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 320,
   },
   summaryBanner: {
     flexDirection: 'row',

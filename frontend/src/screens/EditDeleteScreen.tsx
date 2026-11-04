@@ -286,14 +286,11 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
   // Pickers modal
   const [userPickerVisible, setUserPickerVisible] = useState(false);
   const [gamePickerVisible, setGamePickerVisible] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
   useEffect(() => {
     loadInitialData();
   }, []);
-
-  useEffect(() => {
-    loadTickets();
-  }, [selectedGameId, selectedStatus, targetUserId]);
 
   const loadInitialData = async () => {
     try {
@@ -315,6 +312,7 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
   };
 
   const loadTickets = async (forceRefresh = false) => {
+    setHasSearched(true);
     const params: any = {
       limit: 50,
       includeSummary: false,
@@ -539,6 +537,20 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
               </View>
             </View>
           </View>
+
+          {/* Submit Search Button */}
+          <TouchableOpacity
+            style={styles.submitBtn}
+            activeOpacity={0.85}
+            onPress={() => loadTickets(true)}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.submitBtnText}>Search / View Tickets</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Tickets List Header */}
@@ -554,6 +566,14 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
         {/* Loading Spinner */}
         {loading ? (
           <ActivityIndicator color={colors.emerald} style={{ marginVertical: 30 }} />
+        ) : !hasSearched ? (
+          <View style={styles.promptCard}>
+            <Filter size={36} color="#4F46E5" style={{ marginBottom: 10 }} />
+            <Text style={styles.promptTitle}>Filter & Search Tickets</Text>
+            <Text style={styles.promptSubtitle}>
+              Select a game, seller, status, or enter a ticket number above and tap "Search / View Tickets".
+            </Text>
+          </View>
         ) : tickets.length === 0 ? (
           <View style={styles.emptyCard}>
             <Receipt size={40} color="#94A3B8" />
@@ -822,6 +842,44 @@ const styles = StyleSheet.create({
   statusSegmentTextActive: {
     color: '#0F172A',
     fontWeight: '800',
+  },
+  submitBtn: {
+    backgroundColor: '#4F46E5',
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  submitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  promptCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 24,
+    marginVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
+  },
+  promptTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  promptSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 18,
+    maxWidth: 320,
   },
   listHeaderRow: {
     flexDirection: 'row',
