@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   Modal,
+  StatusBar,
 } from 'react-native';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -200,8 +201,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ onBack, initialTab
       return;
     }
 
-    // Only show full spinner if there's no data currently visible
-    if (!existingCache && !data) {
+    // Tab switch or new filter without cache: clear stale tab data and show loading spinner
+    if (!existingCache) {
+      setData(null);
       setLoading(true);
     }
 
@@ -1441,8 +1443,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? 24 : 12,
-    paddingBottom: 12,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ? StatusBar.currentHeight + 20 : 48) : 38,
+    paddingBottom: 14,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',

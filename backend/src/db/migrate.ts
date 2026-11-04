@@ -133,6 +133,7 @@ export async function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_tickets_draw ON tickets(draw_id);
       CREATE INDEX IF NOT EXISTS idx_tickets_number ON tickets(ticket_number);
       CREATE INDEX IF NOT EXISTS idx_tickets_org_status_created ON tickets(org_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tickets_org_created ON tickets(org_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tickets_draw_status ON tickets(draw_id, status);
 
       CREATE TABLE IF NOT EXISTS ticket_entries (

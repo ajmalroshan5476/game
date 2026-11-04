@@ -24,7 +24,7 @@ export class ReportService {
     let whereClause = `WHERE t.org_id = $1 AND t.status = 'ACTIVE'`;
     const params: any[] = [orgId];
 
-    if (userId) {
+    if (userId && userId !== 'ALL' && userId !== 'undefined') {
       params.push(userId);
       whereClause += ` AND t.user_id = $${params.length}`;
     }
@@ -124,13 +124,12 @@ export class ReportService {
       `;
     } else {
       summarySql = `
-        SELECT COUNT(DISTINCT t.id) AS total_bills,
+        SELECT COUNT(t.id) AS total_bills,
                COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
                COALESCE(SUM(t.total_amount), 0) AS total_sales
         FROM tickets t
         JOIN draws d ON d.id = t.draw_id
-        JOIN games g ON g.id = d.game_id
-        JOIN users u ON u.id = t.user_id
+        ${filters?.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined' ? 'JOIN games g ON g.id = d.game_id' : ''}
         ${whereClause}
       `;
     }
@@ -162,7 +161,7 @@ export class ReportService {
     let whereClause = `WHERE wr.org_id = $1`;
     const params: any[] = [orgId];
 
-    if (userId) {
+    if (userId && userId !== 'ALL' && userId !== 'undefined') {
       params.push(userId);
       whereClause += ` AND wr.user_id = $${params.length}`;
     }
@@ -257,7 +256,7 @@ export class ReportService {
     let whereClause = `WHERE wr.org_id = $1`;
     const params: any[] = [orgId];
 
-    if (userId) {
+    if (userId && userId !== 'ALL' && userId !== 'undefined') {
       params.push(userId);
       whereClause += ` AND wr.user_id = $${params.length}`;
     }
@@ -330,7 +329,7 @@ export class ReportService {
     let whereClause = `WHERE t.org_id = $1 AND t.status = 'ACTIVE'`;
     const params: any[] = [orgId];
 
-    if (userId) {
+    if (userId && userId !== 'ALL' && userId !== 'undefined') {
       params.push(userId);
       whereClause += ` AND t.user_id = $${params.length}`;
     }

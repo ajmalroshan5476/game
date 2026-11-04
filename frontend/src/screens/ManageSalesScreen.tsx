@@ -10,6 +10,7 @@ import {
   Platform,
   Modal,
   Alert,
+  StatusBar,
 } from 'react-native';
 import { api } from '../api/client';
 import { colors } from '../theme/colors';
@@ -42,6 +43,7 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
   const [games, setGames] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [salesData, setSalesData] = useState<any>(null);
+  const salesCacheRef = React.useRef<Record<string, any>>({});
   const [selectedTicketForEdit, setSelectedTicketForEdit] = useState<any | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [userPrices, setUserPrices] = useState<any[]>([]);
@@ -131,7 +133,8 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
             try {
               await api.cancelTicket(bill.ticket_number);
               Alert.alert('Success', `Bill #${bill.ticket_number} cancelled successfully.`);
-              await fetchSales();
+              salesCacheRef.current = {};
+              await fetchSales(true);
             } catch (err: any) {
               Alert.alert('Error', err.message || 'Failed to cancel ticket');
             } finally {
@@ -163,8 +166,7 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
     setPickerType(null);
   };
 
-  const fetchSales = async () => {
-    setLoading(true);
+  const fetchSales = async (forceRefresh = false) => {
     const params: any = {
       fromDate,
       toDate,
@@ -178,8 +180,17 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
       params.mode = selectedMode;
     }
 
+    const cacheKey = JSON.stringify(params);
+    if (!forceRefresh && salesCacheRef.current[cacheKey]) {
+      setSalesData(salesCacheRef.current[cacheKey]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     try {
-      const res = await api.getSalesReport(params);
+      const res = await api.getSalesReport(params, forceRefresh);
+      salesCacheRef.current[cacheKey] = res;
       setSalesData(res);
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to fetch sales report');
@@ -498,7 +509,7 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
           <TouchableOpacity
             style={styles.submitButton}
             activeOpacity={0.85}
-            onPress={fetchSales}
+            onPress={() => fetchSales(true)}
             disabled={loading}
           >
             {loading ? (
@@ -681,7 +692,8 @@ export const ManageSalesScreen: React.FC<ManageSalesScreenProps> = ({
           setSelectedTicketForEdit(null);
         }}
         onSuccess={() => {
-          fetchSales();
+          salesCacheRef.current = {};
+          fetchSales(true);
         }}
         userPrices={userPrices}
       />
@@ -699,8 +711,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? 24 : 12,
-    paddingBottom: 12,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ? StatusBar.currentHeight + 20 : 48) : 38,
+    paddingBottom: 14,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',

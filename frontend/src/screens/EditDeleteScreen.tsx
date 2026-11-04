@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   Modal,
+  StatusBar,
 } from 'react-native';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -57,6 +58,7 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
   const [selectedTicketForEdit, setSelectedTicketForEdit] = useState<any | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [cancellingTicketNum, setCancellingTicketNum] = useState<string | null>(null);
+  const ticketsCacheRef = React.useRef<Record<string, any>>({});
 
   // Pickers modal
   const [userPickerVisible, setUserPickerVisible] = useState(false);
@@ -89,19 +91,28 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
     } catch {}
   };
 
-  const loadTickets = async () => {
+  const loadTickets = async (forceRefresh = false) => {
+    const params: any = {
+      limit: 50,
+    };
+    if (selectedStatus !== 'ALL') params.status = selectedStatus;
+    if (selectedGameId !== 'ALL') params.gameId = selectedGameId;
+    if (isAdmin && targetUserId !== 'ALL') params.targetUserId = targetUserId;
+    if (ticketSearch.trim()) params.search = ticketSearch.trim();
+
+    const cacheKey = JSON.stringify(params);
+    if (!forceRefresh && ticketsCacheRef.current[cacheKey]) {
+      setTickets(ticketsCacheRef.current[cacheKey]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      const params: any = {
-        limit: 50,
-      };
-      if (selectedStatus !== 'ALL') params.status = selectedStatus;
-      if (selectedGameId !== 'ALL') params.gameId = selectedGameId;
-      if (isAdmin && targetUserId !== 'ALL') params.targetUserId = targetUserId;
-      if (ticketSearch.trim()) params.search = ticketSearch.trim();
-
-      const res = await api.getTickets(params);
-      setTickets(res.tickets || []);
+      const res = await api.getTickets(params, forceRefresh);
+      const list = res.tickets || [];
+      ticketsCacheRef.current[cacheKey] = list;
+      setTickets(list);
     } catch (err: any) {
       Alert.alert('Load Error', err.message || 'Could not load tickets');
     } finally {
@@ -110,7 +121,7 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
   };
 
   const handleSearchSubmit = () => {
-    loadTickets();
+    loadTickets(true);
   };
 
   const handleCancelTicket = (t: any) => {
@@ -143,7 +154,8 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
             try {
               await api.cancelTicket(t.ticket_number);
               Alert.alert('Success', `Ticket #${t.ticket_number} cancelled successfully.`);
-              await loadTickets();
+              ticketsCacheRef.current = {};
+              await loadTickets(true);
             } catch (err: any) {
               Alert.alert('Cancellation Error', err.message || 'Failed to cancel ticket');
             } finally {
@@ -418,7 +430,7 @@ export const EditDeleteScreen: React.FC<EditDeleteScreenProps> = ({ onBack }) =>
             {isAdmin ? 'Admin Mode (All Tickets)' : `User: ${user?.username} (My Tickets)`}
           </Text>
         </View>
-        <TouchableOpacity style={styles.refreshBtn} onPress={loadTickets}>
+        <TouchableOpacity style={styles.refreshBtn} onPress={() => loadTickets(true)}>
           <RefreshCw size={18} color="#00A86B" />
         </TouchableOpacity>
       </View>
@@ -666,8 +678,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? 24 : 12,
-    paddingBottom: 12,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ? StatusBar.currentHeight + 20 : 48) : 38,
+    paddingBottom: 14,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',

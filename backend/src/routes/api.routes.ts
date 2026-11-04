@@ -590,7 +590,10 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/sales', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
+    const rawTarget = queryParams.targetUserId || queryParams.userId;
+    const effectiveUserId = role === 'ADMIN'
+      ? (rawTarget && rawTarget !== 'ALL' && rawTarget !== 'undefined' ? rawTarget : undefined)
+      : userId;
 
     return await ReportService.getSalesReport(orgId, effectiveUserId, queryParams);
   });
@@ -598,7 +601,10 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/winnings', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
+    const rawTarget = queryParams.targetUserId || queryParams.userId;
+    const effectiveUserId = role === 'ADMIN'
+      ? (rawTarget && rawTarget !== 'ALL' && rawTarget !== 'undefined' ? rawTarget : undefined)
+      : userId;
 
     return await ReportService.getWinningsReport(orgId, effectiveUserId, queryParams);
   });
@@ -606,7 +612,10 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/bill-wise', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
+    const rawTarget = queryParams.targetUserId || queryParams.userId;
+    const effectiveUserId = role === 'ADMIN'
+      ? (rawTarget && rawTarget !== 'ALL' && rawTarget !== 'undefined' ? rawTarget : undefined)
+      : userId;
 
     return await ReportService.getWinningBillWise(orgId, effectiveUserId, queryParams);
   });
@@ -614,18 +623,24 @@ export async function apiRoutes(fastify: FastifyInstance) {
   fastify.get('/api/reports/number-wise', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? queryParams.targetUserId || queryParams.userId : userId;
+    const rawTarget = queryParams.targetUserId || queryParams.userId;
+    const effectiveUserId = role === 'ADMIN'
+      ? (rawTarget && rawTarget !== 'ALL' && rawTarget !== 'undefined' ? rawTarget : undefined)
+      : userId;
     return await ReportService.getNumberWiseReport(orgId, effectiveUserId, queryParams);
   });
 
   fastify.get('/api/reports/net-pay', { preHandler: authenticate }, async (req) => {
     const { orgId, userId, role } = req.user!;
     const queryParams = req.query as any;
-    const effectiveUserId = role === 'ADMIN' ? (queryParams.targetUserId || queryParams.userId || 'ALL') : userId;
+    const rawTarget = queryParams.targetUserId || queryParams.userId;
+    const effectiveUserId = role === 'ADMIN'
+      ? (rawTarget && rawTarget !== 'ALL' && rawTarget !== 'undefined' ? rawTarget : undefined)
+      : userId;
 
     const safeFilters = {
       ...queryParams,
-      targetUserId: role === 'ADMIN' ? (queryParams.targetUserId || queryParams.userId) : userId,
+      targetUserId: effectiveUserId,
     };
 
     return await ReportService.getNetPayReport(orgId, effectiveUserId, safeFilters);

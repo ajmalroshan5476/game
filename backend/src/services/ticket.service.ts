@@ -920,13 +920,12 @@ export class TicketService {
     `;
 
     const summarySql = `
-      SELECT COUNT(DISTINCT t.id) AS total_bills,
+      SELECT COUNT(t.id) AS total_bills,
              COALESCE(SUM(t.total_quantity), 0) AS total_quantity,
              COALESCE(SUM(t.total_amount), 0) AS total_sales
       FROM tickets t
       JOIN draws d ON d.id = t.draw_id
-      JOIN games g ON g.id = d.game_id
-      JOIN users u ON u.id = t.user_id
+      ${filters.gameId && filters.gameId !== 'ALL' && filters.gameId !== 'undefined' ? 'JOIN games g ON g.id = d.game_id' : ''}
       ${whereClause}
     `;
 
