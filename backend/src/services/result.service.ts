@@ -281,8 +281,9 @@ export class ResultService {
   /**
    * Result Checking: Inspect whether any numbers entered by users under this admin won,
    * along with the username, ticket number, mode, prize category, and amounts.
+   * If userId is provided, filters winners to only those belonging to that specific user.
    */
-  static async getCheckResult(orgId: string, drawId: string) {
+  static async getCheckResult(orgId: string, drawId: string, userId?: string) {
     const drawRes = await query(
       `SELECT d.id, d.draw_date, d.draw_time, d.status,
               g.id AS game_id, g.name AS game_name, g.color AS game_color,
@@ -302,22 +303,30 @@ export class ResultService {
 
     const draw = drawRes.rows[0];
 
-    // Find winning records for the active result of this draw under this org
-    const winnersRes = draw.result_id
-      ? await query(
-          `SELECT DISTINCT ON (wr.id) wr.id, wr.prize_position, wr.prize_amount, wr.commission_amount, wr.created_at,
-                  t.ticket_number, t.customer_name,
-                  te.number AS winning_number, te.quantity, te.mode,
-                  u.username, u.id AS user_id
-           FROM winning_records wr
-           JOIN tickets t ON t.id = wr.ticket_id
-           JOIN ticket_entries te ON te.id = wr.entry_id
-           JOIN users u ON u.id = wr.user_id
-           WHERE wr.result_id = $1 AND wr.org_id = $2
-           ORDER BY wr.id, wr.prize_amount DESC, wr.created_at ASC`,
-          [draw.result_id, orgId]
-        )
-      : { rows: [] };
+    // Find winning records for the active result of this draw under this org (and user if non-admin)
+    let winnersRes: { rows: any[] } = { rows: [] };
+    if (draw.result_id) {
+      let whereClause = `WHERE wr.result_id = $1 AND wr.org_id = $2`;
+      const params: any[] = [draw.result_id, orgId];
+      if (userId) {
+        params.push(userId);
+        whereClause += ` AND wr.user_id = $${params.length}`;
+      }
+
+      winnersRes = await query(
+        `SELECT DISTINCT ON (wr.id) wr.id, wr.prize_position, wr.prize_amount, wr.commission_amount, wr.created_at,
+                t.ticket_number, t.customer_name,
+                te.number AS winning_number, te.quantity, te.mode,
+                u.username, u.id AS user_id
+         FROM winning_records wr
+         JOIN tickets t ON t.id = wr.ticket_id
+         JOIN ticket_entries te ON te.id = wr.entry_id
+         JOIN users u ON u.id = wr.user_id
+         ${whereClause}
+         ORDER BY wr.id, wr.prize_amount DESC, wr.created_at ASC`,
+        params
+      );
+    }
 
     let totalPrize = 0;
     let totalCommission = 0;

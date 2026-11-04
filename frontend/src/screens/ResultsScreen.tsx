@@ -1026,7 +1026,9 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                             WINNING TICKETS DETECTED!
                           </Text>
                           <Text style={styles.winnersFoundSub}>
-                            {checkingData.summary.totalWinners} winning entry(ies) sold by users under your agency.
+                            {user?.role === 'ADMIN'
+                              ? `${checkingData.summary.totalWinners} winning entry(ies) sold by users under your agency.`
+                              : `${checkingData.summary.totalWinners} winning entry(ies) in your booked tickets.`}
                           </Text>
                         </View>
                       </View>
@@ -1051,7 +1053,9 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                       <View style={{ flex: 1, marginLeft: 10 }}>
                         <Text style={styles.noWinnersTitle}>NO WINNERS IN THIS DRAW</Text>
                         <Text style={styles.noWinnersSub}>
-                          None of the numbers booked by users under you matched the winning results for this draw.
+                          {user?.role === 'ADMIN'
+                            ? 'None of the numbers booked by users under you matched the winning results for this draw.'
+                            : 'None of your booked numbers matched the winning results for this draw.'}
                         </Text>
                       </View>
                     </View>
@@ -1062,7 +1066,9 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                 {checkingData.winners && checkingData.winners.length > 0 && (
                   <View style={styles.winnersListSection}>
                     <Text style={styles.winnersListHeading}>
-                      WINNING NUMBERS & AGENT DETAILS ({checkingData.winners.length})
+                      {user?.role === 'ADMIN'
+                        ? `WINNING NUMBERS & AGENT DETAILS (${checkingData.winners.length})`
+                        : `YOUR WINNING NUMBERS & PRIZE DETAILS (${checkingData.winners.length})`}
                     </Text>
 
                     {checkingData.winners.map((w: any) => (
@@ -1071,7 +1077,9 @@ export const ResultsScreen: React.FC<ResultsScreenProps> = ({ onBack, initialTab
                         <View style={styles.winnerCardTop}>
                           <View style={styles.agentBadge}>
                             <User size={13} color="#1E293B" />
-                            <Text style={styles.agentBadgeText}>Agent: {w.username}</Text>
+                            <Text style={styles.agentBadgeText}>
+                              {user?.role === 'ADMIN' ? `Agent: ${w.username}` : `My Ticket (${w.username})`}
+                            </Text>
                           </View>
                           <View style={styles.positionBadge}>
                             <Award size={13} color="#B45309" />

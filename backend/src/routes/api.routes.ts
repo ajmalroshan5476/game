@@ -479,7 +479,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
   });
 
   fastify.get('/api/results/check/:drawId', { preHandler: authenticate }, async (req, reply) => {
-    const { orgId } = req.user!;
+    const { orgId, userId, role } = req.user!;
     const { drawId } = req.params as any;
 
     if (!drawId) {
@@ -487,7 +487,8 @@ export async function apiRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      const data = await ResultService.getCheckResult(orgId, drawId);
+      const effectiveUserId = role === 'ADMIN' ? undefined : userId;
+      const data = await ResultService.getCheckResult(orgId, drawId, effectiveUserId);
       return data;
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
