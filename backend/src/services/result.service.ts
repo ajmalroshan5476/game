@@ -10,92 +10,11 @@ export interface PublishResultPayload {
   sixthPrizes?: string[]; // Array of up to 30 numbers
 }
 
-export interface BoxWinEvaluation {
-  winningPos: string;
-  prizeAmount: number;
-  superCommission: number;
-}
-
-export function isBoxMatch(betNumber: string, winNumber: string): boolean {
+function isBoxMatch(betNumber: string, winNumber: string): boolean {
   if (betNumber.length !== winNumber.length) return false;
   const sortedBet = betNumber.split('').sort().join('');
   const sortedWin = winNumber.split('').sort().join('');
   return sortedBet === sortedWin;
-}
-
-/**
- * Calculates prize and commission for BOX bets according to the digit distribution:
- * 1. Triples (e.g. 666, 111, 222, ...): 7000 prize + 300 comm
- * 2. Doubles (number with same digit twice, e.g. 112, 121, 313, 448):
- *    - Direct match: 3300 + 830 = 4130 prize + 300 + 30 = 330 comm
- *    - Reverse match: 830 + 830 = 1660 prize + 30 + 30 = 60 comm
- * 3. Normal mixed numbers (all 3 digits distinct, e.g. 123):
- *    - Direct match: 3000 prize + 300 comm
- *    - Reverse match: 800 prize + 30 comm
- */
-export function evaluateBoxWin(
-  betNumber: string,
-  firstPrize: string,
-  getRule?: (mode: string, pos: string, fallbackPrize: number, fallbackSuper: number) => { prizeAmount: number; superCommission: number }
-): BoxWinEvaluation | null {
-  if (betNumber.length !== 3 || firstPrize.length < 3) return null;
-  const clean1st = firstPrize.trim().substring(0, 3);
-  if (!isBoxMatch(betNumber, clean1st)) return null;
-
-  const lookup = getRule || ((_m, _p, p, s) => ({ prizeAmount: p, superCommission: s }));
-  const uniqueDigits = new Set(clean1st.split('')).size;
-  const isDirect = betNumber === clean1st;
-
-  if (uniqueDigits === 1) {
-    // Triples: e.g. 666, 111, 222, 333, 444, 555, 777, 888, 999, 000
-    // Prize: 7000, Commission: 300 for qty 1
-    const r = lookup('BOX', 'TRIPLE', 7000.0, 300.0);
-    return {
-      winningPos: 'BOX_TRIPLE',
-      prizeAmount: r.prizeAmount,
-      superCommission: r.superCommission,
-    };
-  }
-
-  if (uniqueDigits === 2) {
-    // Doubles: number with same digit twice, e.g. 112, 121, 313, 448
-    if (isDirect) {
-      // Direct exact match: 3300 + 830 = 4130 prize, 300 + 30 = 330 commission
-      const r = lookup('BOX', 'DOUBLE_1ST', 4130.0, 330.0);
-      return {
-        winningPos: 'BOX_DOUBLE_1ST',
-        prizeAmount: r.prizeAmount,
-        superCommission: r.superCommission,
-      };
-    } else {
-      // Reverse match: 830 + 830 = 1660 prize, 30 + 30 = 60 commission
-      const r = lookup('BOX', 'DOUBLE_OTH', 1660.0, 60.0);
-      return {
-        winningPos: 'BOX_DOUBLE_OTH',
-        prizeAmount: r.prizeAmount,
-        superCommission: r.superCommission,
-      };
-    }
-  }
-
-  // Normal mixed numbers: all 3 digits distinct, e.g. 123
-  if (isDirect) {
-    // Exact typed number: 3000 prize, 300 commission
-    const r = lookup('BOX', 'FIRST', 3000.0, 300.0);
-    return {
-      winningPos: 'BOX_FIRST',
-      prizeAmount: r.prizeAmount,
-      superCommission: r.superCommission,
-    };
-  } else {
-    // Reverse box (e.g. 321, 213): 800 prize, 30 commission
-    const r = lookup('BOX', 'SECOND', 800.0, 30.0);
-    return {
-      winningPos: 'BOX_OTHER',
-      prizeAmount: r.prizeAmount,
-      superCommission: r.superCommission,
-    };
-  }
 }
 
 export class ResultService {
@@ -223,15 +142,10 @@ export class ResultService {
         if (entry.number.length === 3) {
           if (entry.mode === 'BOX' || entry.is_box) {
             // BOX Mode Evaluation: ONLY first prize is eligible for the BOX prize!
-            const boxWin = evaluateBoxWin(entry.number, clean1st, getRule);
-            if (boxWin) {
-              matchedWins.push({
-                winningPos: boxWin.winningPos,
-                rule: {
-                  prizeAmount: boxWin.prizeAmount,
-                  superCommission: boxWin.superCommission,
-                },
-              });
+            if (entry.number === clean1st) {
+              matchedWins.push({ winningPos: 'BOX_FIRST', rule: getRule('BOX', 'FIRST', 3000.0, 300.0) });
+            } else if (isBoxMatch(entry.number, clean1st)) {
+              matchedWins.push({ winningPos: 'BOX_OTHER', rule: getRule('BOX', 'SECOND', 800.0, 30.0) });
             }
           } else {
             // SUPER Mode Evaluation:

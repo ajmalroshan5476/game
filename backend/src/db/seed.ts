@@ -83,9 +83,6 @@ export async function runSeed() {
       { mode: 'BOX', pos: 'FOURTH', count: 1, prize: 800.0, super: 30.0 },
       { mode: 'BOX', pos: 'FIFTH', count: 1, prize: 800.0, super: 30.0 },
       { mode: 'BOX', pos: 'SIXTH', count: 1, prize: 800.0, super: 30.0 },
-      { mode: 'BOX', pos: 'TRIPLE', count: 1, prize: 7000.0, super: 300.0 },
-      { mode: 'BOX', pos: 'DOUBLE_1ST', count: 1, prize: 4130.0, super: 330.0 },
-      { mode: 'BOX', pos: 'DOUBLE_OTH', count: 1, prize: 1660.0, super: 60.0 },
 
       // Group 2: AB, BC, AC (Rate: 10)
       { mode: 'AB', pos: 'FIRST', count: 1, prize: 700.0, super: 30.0 },

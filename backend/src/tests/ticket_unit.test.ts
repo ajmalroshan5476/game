@@ -1,5 +1,4 @@
 import { TicketService, normalizeModeForNumber, LimitExceededError } from '../services/ticket.service.js';
-import { evaluateBoxWin } from '../services/result.service.js';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -259,52 +258,6 @@ console.log('Running Ticket Unit Tests...');
   assert(r5[1].number === '345' && r5[1].count === 2 && r5[1].boxCount === 1, '345: 2 super, 1 box');
   assert(r5[2].number === '456' && r5[2].count === 3 && r5[2].boxCount === 2, '456: 3 super, 2 box');
   assert(r5[3].number === '478' && r5[3].count === 5 && r5[3].boxCount === 3, '478: 5 super, 3 box (timestamp 10:36 PM ignored)');
-}
-
-// 7. BOX Winning Formula Unit Tests
-{
-  console.log('Running BOX Winning Formula Unit Tests...');
-  // Triples (e.g. 666 vs 666) -> 7000 prize, 300 comm
-  const t1 = evaluateBoxWin('666', '666');
-  assert(t1 !== null && t1.prizeAmount === 7000 && t1.superCommission === 300 && t1.winningPos === 'BOX_TRIPLE', 'Triples 666 wins 7000 prize, 300 comm');
-
-  const t2 = evaluateBoxWin('111', '111');
-  assert(t2 !== null && t2.prizeAmount === 7000 && t2.superCommission === 300, 'Triples 111 wins 7000 prize, 300 comm');
-
-  const t0 = evaluateBoxWin('000', '000');
-  assert(t0 !== null && t0.prizeAmount === 7000 && t0.superCommission === 300, 'Triples 000 wins 7000 prize, 300 comm');
-
-  // Doubles Exact (121 vs 121) -> 3300 + 830 = 4130 prize, 300 + 30 = 330 comm
-  const t3 = evaluateBoxWin('121', '121');
-  assert(t3 !== null && t3.prizeAmount === 4130 && t3.superCommission === 330 && t3.winningPos === 'BOX_DOUBLE_1ST', 'Doubles exact 121 vs 121 wins 4130 (3300+830) prize, 330 (300+30) comm');
-
-  const t4 = evaluateBoxWin('112', '112');
-  assert(t4 !== null && t4.prizeAmount === 4130 && t4.superCommission === 330, 'Doubles exact 112 vs 112 wins 4130 prize, 330 comm');
-
-  const t4b = evaluateBoxWin('448', '448');
-  assert(t4b !== null && t4b.prizeAmount === 4130 && t4b.superCommission === 330, 'Doubles exact 448 vs 448 wins 4130 prize, 330 comm');
-
-  // Doubles Reverse (121 vs 112) -> 830 + 830 = 1660 prize, 30 + 30 = 60 comm
-  const t5 = evaluateBoxWin('121', '112');
-  assert(t5 !== null && t5.prizeAmount === 1660 && t5.superCommission === 60 && t5.winningPos === 'BOX_DOUBLE_OTH', 'Doubles reverse 121 vs 112 wins 1660 (830+830) prize, 60 (30+30) comm');
-
-  const t6 = evaluateBoxWin('313', '331');
-  assert(t6 !== null && t6.prizeAmount === 1660 && t6.superCommission === 60, 'Doubles reverse 313 vs 331 wins 1660 prize, 60 comm');
-
-  // Normal Mixed Exact (123 vs 123) -> 3000 prize, 300 comm
-  const t7 = evaluateBoxWin('123', '123');
-  assert(t7 !== null && t7.prizeAmount === 3000 && t7.superCommission === 300 && t7.winningPos === 'BOX_FIRST', 'Mixed exact 123 vs 123 wins 3000 prize, 300 comm');
-
-  // Normal Mixed Reverse (123 vs 321) -> 800 prize, 30 comm
-  const t8 = evaluateBoxWin('123', '321');
-  assert(t8 !== null && t8.prizeAmount === 800 && t8.superCommission === 30 && t8.winningPos === 'BOX_OTHER', 'Mixed reverse 123 vs 321 wins 800 prize, 30 comm');
-
-  const t9 = evaluateBoxWin('123', '213');
-  assert(t9 !== null && t9.prizeAmount === 800 && t9.superCommission === 30, 'Mixed reverse 123 vs 213 wins 800 prize, 30 comm');
-
-  // No Match (123 vs 456) -> null
-  const t10 = evaluateBoxWin('123', '456');
-  assert(t10 === null, 'No match 123 vs 456 returns null');
 }
 
 console.log('All ticket unit tests PASSED successfully!');
