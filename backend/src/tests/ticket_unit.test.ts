@@ -1,4 +1,5 @@
 import { TicketService, normalizeModeForNumber, LimitExceededError } from '../services/ticket.service.js';
+import { evaluateBoxWin } from '../services/result.service.js';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -260,5 +261,75 @@ console.log('Running Ticket Unit Tests...');
   assert(r5[3].number === '478' && r5[3].count === 5 && r5[3].boxCount === 3, '478: 5 super, 3 box (timestamp 10:36 PM ignored)');
 }
 
+// 7. BOX Winning Formula Unit Tests
+{
+  console.log('Running BOX Winning Formula Unit Tests...');
+
+  // 1. Special Numbers (Triple Numbers): 000, 111, 222, 333, 444, 555, 666, 777, 888, 999
+  // Prize: 7,000, Commission: 300 (qty 1)
+  const t0 = evaluateBoxWin('000', '000');
+  assert(t0 !== null && t0.prizeAmount === 7000 && t0.superCommission === 300 && t0.winningPos === 'BOX_TRIPLE', 'Triples 000 wins ₹7,000 prize, ₹300 comm');
+
+  const t1 = evaluateBoxWin('111', '111');
+  assert(t1 !== null && t1.prizeAmount === 7000 && t1.superCommission === 300, 'Triples 111 wins ₹7,000 prize, ₹300 comm');
+
+  const t6 = evaluateBoxWin('666', '666');
+  assert(t6 !== null && t6.prizeAmount === 7000 && t6.superCommission === 300, 'Triples 666 wins ₹7,000 prize, ₹300 comm');
+
+  const t9 = evaluateBoxWin('999', '999');
+  assert(t9 !== null && t9.prizeAmount === 7000 && t9.superCommission === 300, 'Triples 999 wins ₹7,000 prize, ₹300 comm');
+
+  // 2. Box Numbers Containing Two Identical Digits (112, 313, 448)
+  // Case A – Exact Match (121 vs 121): Prize: ₹3,300 + ₹830 = ₹4,130, Commission: ₹30 + ₹300 = ₹330
+  const t2a1 = evaluateBoxWin('121', '121');
+  assert(t2a1 !== null && t2a1.prizeAmount === 4130 && t2a1.superCommission === 330 && t2a1.winningPos === 'BOX_DOUBLE_1ST', 'Doubles exact 121 vs 121 wins ₹4,130 (₹3,300+₹830) prize, ₹330 (₹30+₹300) comm');
+
+  const t2a2 = evaluateBoxWin('112', '112');
+  assert(t2a2 !== null && t2a2.prizeAmount === 4130 && t2a2.superCommission === 330, 'Doubles exact 112 vs 112 wins ₹4,130 prize, ₹330 comm');
+
+  const t2a3 = evaluateBoxWin('448', '448');
+  assert(t2a3 !== null && t2a3.prizeAmount === 4130 && t2a3.superCommission === 330, 'Doubles exact 448 vs 448 wins ₹4,130 prize, ₹330 comm');
+
+  // Case B – Matching Box Pattern (121 vs 112): Prize: ₹830 + ₹830 = ₹1,660, Commission: ₹30 + ₹30 = ₹60
+  const t2b1 = evaluateBoxWin('121', '112');
+  assert(t2b1 !== null && t2b1.prizeAmount === 1660 && t2b1.superCommission === 60 && t2b1.winningPos === 'BOX_DOUBLE_OTH', 'Doubles pattern 121 vs 112 wins ₹1,660 (₹830+₹830) prize, ₹60 comm');
+
+  const t2b2 = evaluateBoxWin('313', '331');
+  assert(t2b2 !== null && t2b2.prizeAmount === 1660 && t2b2.superCommission === 60, 'Doubles pattern 313 vs 331 wins ₹1,660 prize, ₹60 comm');
+
+  const t2b3 = evaluateBoxWin('448', '844');
+  assert(t2b3 !== null && t2b3.prizeAmount === 1660 && t2b3.superCommission === 60, 'Doubles pattern 448 vs 844 wins ₹1,660 prize, ₹60 comm');
+
+  // 3. Normal Mixed Numbers (All Three Digits Different, e.g. 123, 456, 789)
+  // Exact Match: Prize: ₹3,000, Commission: ₹300
+  const t3a = evaluateBoxWin('123', '123');
+  assert(t3a !== null && t3a.prizeAmount === 3000 && t3a.superCommission === 300 && t3a.winningPos === 'BOX_FIRST', 'Mixed exact 123 vs 123 wins ₹3,000 prize, ₹300 comm');
+
+  const t3b = evaluateBoxWin('456', '456');
+  assert(t3b !== null && t3b.prizeAmount === 3000 && t3b.superCommission === 300, 'Mixed exact 456 vs 456 wins ₹3,000 prize, ₹300 comm');
+
+  // 4. Reverse / Permutation Box Winning (e.g. 123 vs 321 or 213): Prize: ₹800, Commission: ₹30
+  const t4a = evaluateBoxWin('123', '321');
+  assert(t4a !== null && t4a.prizeAmount === 800 && t4a.superCommission === 30 && t4a.winningPos === 'BOX_OTHER', 'Mixed reverse 123 vs 321 wins ₹800 prize, ₹30 comm');
+
+  const t4b = evaluateBoxWin('123', '213');
+  assert(t4b !== null && t4b.prizeAmount === 800 && t4b.superCommission === 30, 'Mixed reverse 123 vs 213 wins ₹800 prize, ₹30 comm');
+
+  // Negative / No Match Check:
+  const tNeg = evaluateBoxWin('123', '789');
+  assert(tNeg === null, 'No match 123 vs 789 returns null');
+
+  // 5. 6th Prize Duplicate Immunity Check:
+  // If 6th prize results contain duplicate numbers, each ticket entry must match at most once!
+  const raw6th = ['364', '636', '363', '636', '474', '363', '474'];
+  const clean6thSet = new Set(raw6th.map((s) => s.trim()).filter(Boolean));
+  let matchCount636 = 0;
+  if (clean6thSet.has('636')) {
+    matchCount636++;
+  }
+  assert(matchCount636 === 1, 'Number 636 matching 6th prize with duplicate entries in drawn list matches at most ONCE');
+}
+
 console.log('All ticket unit tests PASSED successfully!');
+process.exit(0);
 

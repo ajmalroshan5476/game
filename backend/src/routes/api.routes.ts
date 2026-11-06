@@ -218,23 +218,16 @@ export async function apiRoutes(fastify: FastifyInstance) {
             [g.id, todayStr, drawTime, cutoffTime, editCutoffTime]
           );
         } else {
-          // Keep cutoffs synced
-          let cutoffTime = `${todayStr}T15:03:00+05:30`;
-          let editCutoffTime = `${todayStr}T15:00:00+05:30`;
+          // Keep cutoffs synced for standard games only; preserve custom/temp game cutoffs!
           if (g.name.includes('1 PM') || g.code.includes('1PM')) {
-            cutoffTime = `${todayStr}T12:58:00+05:30`;
-            editCutoffTime = `${todayStr}T12:55:00+05:30`;
+            await query(`UPDATE draws SET cutoff_time = $1, edit_cutoff_time = $2 WHERE id = $3`, [`${todayStr}T12:58:00+05:30`, `${todayStr}T12:55:00+05:30`, existRes.rows[0].id]);
           } else if (g.name.includes('6 PM') || g.code.includes('6PM')) {
-            cutoffTime = `${todayStr}T17:58:00+05:30`;
-            editCutoffTime = `${todayStr}T17:55:00+05:30`;
+            await query(`UPDATE draws SET cutoff_time = $1, edit_cutoff_time = $2 WHERE id = $3`, [`${todayStr}T17:58:00+05:30`, `${todayStr}T17:55:00+05:30`, existRes.rows[0].id]);
           } else if (g.name.includes('8 PM') || g.code.includes('8PM')) {
-            cutoffTime = `${todayStr}T19:58:00+05:30`;
-            editCutoffTime = `${todayStr}T19:55:00+05:30`;
+            await query(`UPDATE draws SET cutoff_time = $1, edit_cutoff_time = $2 WHERE id = $3`, [`${todayStr}T19:58:00+05:30`, `${todayStr}T19:55:00+05:30`, existRes.rows[0].id]);
+          } else if (g.name.includes('3 PM') || g.code.includes('3PM')) {
+            await query(`UPDATE draws SET cutoff_time = $1, edit_cutoff_time = $2 WHERE id = $3`, [`${todayStr}T15:03:00+05:30`, `${todayStr}T15:00:00+05:30`, existRes.rows[0].id]);
           }
-          await query(
-            `UPDATE draws SET cutoff_time = $1, edit_cutoff_time = $2 WHERE id = $3`,
-            [cutoffTime, editCutoffTime, existRes.rows[0].id]
-          );
         }
       }
       lastDrawsSyncKey = currentSyncKey;
@@ -253,7 +246,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
                   'isCutoffPassed', (NOW() >= d.cutoff_time)
                 ) ORDER BY d.draw_date DESC, d.draw_time ASC)
                 FROM draws d
-                WHERE d.game_id = g.id AND d.draw_date >= $2::date
+                WHERE d.game_id = g.id AND (d.draw_date >= $2::date OR (d.status = 'OPEN' AND d.cutoff_time > NOW()))
               ) AS draws
        FROM games g
        WHERE g.org_id = $1 AND g.is_active = TRUE
@@ -280,7 +273,7 @@ export async function apiRoutes(fastify: FastifyInstance) {
               g.name AS game_name, g.color AS game_color
        FROM draws d
        JOIN games g ON g.id = d.game_id
-       WHERE g.org_id = $1 AND d.draw_date = $2
+       WHERE g.org_id = $1 AND (d.draw_date = $2 OR (d.status = 'OPEN' AND d.cutoff_time > NOW()))
        ORDER BY d.draw_time ASC`,
       [orgId, drawDate]
     );

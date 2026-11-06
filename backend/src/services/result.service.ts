@@ -10,11 +10,93 @@ export interface PublishResultPayload {
   sixthPrizes?: string[]; // Array of up to 30 numbers
 }
 
-function isBoxMatch(betNumber: string, winNumber: string): boolean {
+export interface BoxWinEvaluation {
+  winningPos: string;
+  prizeAmount: number;
+  superCommission: number;
+}
+
+export function isBoxMatch(betNumber: string, winNumber: string): boolean {
   if (betNumber.length !== winNumber.length) return false;
   const sortedBet = betNumber.split('').sort().join('');
   const sortedWin = winNumber.split('').sort().join('');
   return sortedBet === sortedWin;
+}
+
+/**
+ * Calculates prize and commission for BOX bets according to the digit distribution:
+ * 1. Special Numbers (Triple Numbers): 000, 111, 222, 333, 444, 555, 666, 777, 888, 999
+ *    - Prize amount: ₹7,000 | Commission: ₹300 (qty 1)
+ * 2. Box Numbers Containing Two Identical Digits (e.g. 112, 313, 448):
+ *    - Case A (Exact Match, e.g. 121 vs 121): Prize: ₹3,300 + ₹830 = ₹4,130 | Commission: ₹30 + ₹300 = ₹330 (qty 1)
+ *    - Case B (Matching Box Pattern, e.g. 121 vs 112): Prize: ₹830 + ₹830 = ₹1,660 | Commission: ₹30 + ₹30 = ₹60 (qty 1)
+ * 3. Normal Mixed Numbers (All Three Digits Different, e.g. 123, 456, 789):
+ *    - Exact Match (123 vs 123): Prize: ₹3,000 | Commission: ₹300 (qty 1)
+ * 4. Reverse / Permutation Box Winning (e.g. 123 vs 321 or 213):
+ *    - Prize: ₹800 | Commission: ₹30 (qty 1)
+ */
+export function evaluateBoxWin(
+  betNumber: string,
+  firstPrize: string,
+  getRule?: (mode: string, pos: string, fallbackPrize: number, fallbackSuper: number) => { prizeAmount: number; superCommission: number }
+): BoxWinEvaluation | null {
+  if (betNumber.length !== 3 || firstPrize.length < 3) return null;
+  const clean1st = firstPrize.trim().substring(0, 3);
+  if (!isBoxMatch(betNumber, clean1st)) return null;
+
+  const lookup = getRule || ((_m, _p, p, s) => ({ prizeAmount: p, superCommission: s }));
+  const uniqueDigits = new Set(clean1st.split('')).size;
+  const isDirect = betNumber === clean1st;
+
+  if (uniqueDigits === 1) {
+    // 1. Triples: 000, 111, 222, 333, 444, 555, 666, 777, 888, 999
+    const r = lookup('BOX', 'TRIPLE', 7000.0, 300.0);
+    return {
+      winningPos: 'BOX_TRIPLE',
+      prizeAmount: r.prizeAmount,
+      superCommission: r.superCommission,
+    };
+  }
+
+  if (uniqueDigits === 2) {
+    // 2. Doubles: e.g. 112, 313, 448 (exactly two identical digits)
+    if (isDirect) {
+      // Case A – Exact Match: ₹3,300 + ₹830 = ₹4,130 | Commission: ₹30 + ₹300 = ₹330
+      const r = lookup('BOX', 'DOUBLE_1ST', 4130.0, 330.0);
+      return {
+        winningPos: 'BOX_DOUBLE_1ST',
+        prizeAmount: r.prizeAmount,
+        superCommission: r.superCommission,
+      };
+    } else {
+      // Case B – Matching Box Pattern: ₹830 + ₹830 = ₹1,660 | Commission: ₹30 + ₹30 = ₹60
+      const r = lookup('BOX', 'DOUBLE_OTH', 1660.0, 60.0);
+      return {
+        winningPos: 'BOX_DOUBLE_OTH',
+        prizeAmount: r.prizeAmount,
+        superCommission: r.superCommission,
+      };
+    }
+  }
+
+  // 3 & 4. Normal Mixed Numbers (all three digits different, e.g. 123)
+  if (isDirect) {
+    // Exact Match: ₹3,000 | Commission: ₹300
+    const r = lookup('BOX', 'FIRST', 3000.0, 300.0);
+    return {
+      winningPos: 'BOX_FIRST',
+      prizeAmount: r.prizeAmount,
+      superCommission: r.superCommission,
+    };
+  } else {
+    // Reverse / Permutation: ₹800 | Commission: ₹30
+    const r = lookup('BOX', 'SECOND', 800.0, 30.0);
+    return {
+      winningPos: 'BOX_OTHER',
+      prizeAmount: r.prizeAmount,
+      superCommission: r.superCommission,
+    };
+  }
 }
 
 export class ResultService {
@@ -83,6 +165,7 @@ export class ResultService {
       const clean4th = payload.fourthPrize?.trim() || null;
       const clean5th = payload.fifthPrize?.trim() || null;
       const clean6th = (payload.sixthPrizes || []).map((s) => s.trim()).filter(Boolean);
+      const clean6thSet = new Set(clean6th);
 
       const resultRes = await client.query(
         `INSERT INTO official_results (
@@ -142,10 +225,15 @@ export class ResultService {
         if (entry.number.length === 3) {
           if (entry.mode === 'BOX' || entry.is_box) {
             // BOX Mode Evaluation: ONLY first prize is eligible for the BOX prize!
-            if (entry.number === clean1st) {
-              matchedWins.push({ winningPos: 'BOX_FIRST', rule: getRule('BOX', 'FIRST', 3000.0, 300.0) });
-            } else if (isBoxMatch(entry.number, clean1st)) {
-              matchedWins.push({ winningPos: 'BOX_OTHER', rule: getRule('BOX', 'SECOND', 800.0, 30.0) });
+            const boxWin = evaluateBoxWin(entry.number, clean1st, getRule);
+            if (boxWin) {
+              matchedWins.push({
+                winningPos: boxWin.winningPos,
+                rule: {
+                  prizeAmount: boxWin.prizeAmount,
+                  superCommission: boxWin.superCommission,
+                },
+              });
             }
           } else {
             // SUPER Mode Evaluation:
@@ -165,11 +253,9 @@ export class ResultService {
             if (clean5th && entry.number === clean5th) {
               matchedWins.push({ winningPos: 'FIFTH', rule: getRule('SUPER', 'FIFTH', 50.0, 20.0) });
             }
-            // 6th prizes can contain duplicate/repeated numbers - match for every occurrence!
-            for (const s6 of clean6th) {
-              if (entry.number === s6) {
-                matchedWins.push({ winningPos: 'SIXTH', rule: getRule('SUPER', 'SIXTH', 20.0, 10.0) });
-              }
+            // 6th prizes can contain duplicate/repeated numbers in results input, but an individual entry matches at most once (no doubling!)
+            if (clean6thSet.has(entry.number)) {
+              matchedWins.push({ winningPos: 'SIXTH', rule: getRule('SUPER', 'SIXTH', 20.0, 10.0) });
             }
           }
         }

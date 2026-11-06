@@ -20,11 +20,12 @@ interface SchemeItem {
   name: string;
   group: string;
   rate: number;
+  note?: string;
   rows: Array<{
-    position: number;
+    position: number | string;
     count: number;
-    amount: number;
-    superAmount: number;
+    amount: number | string;
+    superAmount: number | string;
   }>;
 }
 
@@ -57,13 +58,13 @@ export const SchemeScreen: React.FC<SchemeScreenProps> = ({ onBack }) => {
       name: `${code}-BOX`,
       group: 'Group 3',
       rate: 10,
+      note: 'Triples (666): ₹7,000 + ₹300 Comm | Doubles Direct (121=121): ₹3,300+₹830 = ₹4,130 (+₹330 Comm) | Doubles Pattern (121=112): ₹830+₹830 = ₹1,660 (+₹60 Comm) | Mixed (123): Direct ₹3,000 (+₹300 Comm), Rev ₹800 (+₹30 Comm)',
       rows: [
-        { position: 1, count: 1, amount: 3000, superAmount: 300 },
-        { position: 2, count: 1, amount: 800, superAmount: 30 },
-        { position: 3, count: 1, amount: 800, superAmount: 30 },
-        { position: 4, count: 1, amount: 800, superAmount: 30 },
-        { position: 5, count: 1, amount: 800, superAmount: 30 },
-        { position: 6, count: 1, amount: 800, superAmount: 30 },
+        { position: 'Direct (123)', count: 1, amount: 3000, superAmount: 300 },
+        { position: 'Rev (321)', count: 5, amount: 800, superAmount: 30 },
+        { position: 'Double 1st (121)', count: 1, amount: 4130, superAmount: 330 },
+        { position: 'Double Pattern (112)', count: 2, amount: 1660, superAmount: 60 },
+        { position: 'Triples (666)', count: 1, amount: 7000, superAmount: 300 },
       ],
     },
     {
@@ -177,8 +178,8 @@ export const SchemeScreen: React.FC<SchemeScreenProps> = ({ onBack }) => {
             <View style={styles.table}>
               {/* Table Header */}
               <View style={styles.tableHeaderRow}>
-                <Text style={[styles.thCell, { flex: 1.2 }]}>Position</Text>
-                <Text style={[styles.thCell, { flex: 1 }]}>Count</Text>
+                <Text style={[styles.thCell, { flex: 1.6 }]}>Position</Text>
+                <Text style={[styles.thCell, { flex: 0.8 }]}>Count</Text>
                 <Text style={[styles.thCell, { flex: 1.2 }]}>Amount</Text>
                 <Text style={[styles.thCell, { flex: 1 }]}>Super</Text>
               </View>
@@ -186,13 +187,19 @@ export const SchemeScreen: React.FC<SchemeScreenProps> = ({ onBack }) => {
               {/* Table Rows */}
               {item.rows.map((row, rIdx) => (
                 <View key={rIdx} style={[styles.tableRow, rIdx % 2 === 1 && styles.tableRowAlt]}>
-                  <Text style={[styles.tdCell, { flex: 1.2 }]}>{row.position}</Text>
-                  <Text style={[styles.tdCell, { flex: 1 }]}>{row.count}</Text>
+                  <Text style={[styles.tdCell, { flex: 1.6, textAlign: 'left', paddingLeft: 8 }]}>{row.position}</Text>
+                  <Text style={[styles.tdCell, { flex: 0.8 }]}>{row.count}</Text>
                   <Text style={[styles.tdCell, { flex: 1.2, fontWeight: '700' }]}>{row.amount}</Text>
                   <Text style={[styles.tdCell, { flex: 1 }]}>{row.superAmount}</Text>
                 </View>
               ))}
             </View>
+
+            {item.note && (
+              <View style={styles.cardNoteBox}>
+                <Text style={styles.cardNoteText}>💡 {item.note}</Text>
+              </View>
+            )}
           </View>
         ))}
       </ScrollView>
@@ -356,5 +363,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1E293B',
     textAlign: 'center',
+  },
+  cardNoteBox: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  cardNoteText: {
+    fontSize: 12,
+    color: '#1D4ED8',
+    lineHeight: 18,
+    fontWeight: '500',
   },
 });

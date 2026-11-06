@@ -172,6 +172,7 @@ const LiveCountdownBadge = React.memo(
       closed: false,
       text: '--:--',
     });
+    const lastNotifiedClosed = useRef<boolean | null>(null);
 
     useEffect(() => {
       const update = () => {
@@ -181,6 +182,10 @@ const LiveCountdownBadge = React.memo(
           const m = String(now.getMinutes()).padStart(2, '0');
           const s = String(now.getSeconds()).padStart(2, '0');
           setInfo({ closed: false, text: `${h}:${m}:${s}` });
+          if (lastNotifiedClosed.current !== false) {
+            lastNotifiedClosed.current = false;
+            setTimeout(() => onCutoffChange?.(false), 0);
+          }
           return;
         }
 
@@ -189,10 +194,11 @@ const LiveCountdownBadge = React.memo(
         const diffMs = cutoffDate.getTime() - now.getTime();
 
         if (diffMs <= 0) {
-          setInfo((prev) => {
-            if (!prev.closed) onCutoffChange?.(true);
-            return { closed: true, text: 'CLOSED' };
-          });
+          setInfo({ closed: true, text: 'CLOSED' });
+          if (lastNotifiedClosed.current !== true) {
+            lastNotifiedClosed.current = true;
+            setTimeout(() => onCutoffChange?.(true), 0);
+          }
           return;
         }
 
@@ -207,6 +213,10 @@ const LiveCountdownBadge = React.memo(
             : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
         setInfo({ closed: false, text });
+        if (lastNotifiedClosed.current !== false) {
+          lastNotifiedClosed.current = false;
+          setTimeout(() => onCutoffChange?.(false), 0);
+        }
       };
 
       update();
